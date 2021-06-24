@@ -22,7 +22,7 @@ from utils import adaptive_clip_grad, AdaBelief, apply_kernel_regularizer
 
 
 
-def generate_trainstep(sed_loss, doa_loss, loss_weights, label_smoothing=0.):
+def generate_trainstep(sed_loss, doa_loss, loss_weights, label_smoothing=0.2):
     # These are statistics from the train dataset
     train_samples = tf.convert_to_tensor(
         [[58193, 32794, 29801, 21478, 14822, 
@@ -120,9 +120,14 @@ def generate_iterloop(sed_loss, doa_loss, evaluator, writer,
 
 
 def random_ups_and_downs(x, y):
-    x = tf.concat(
-        [x[..., :4] + tf.random.normal([], stddev=0.2), x[..., 4:]],
-        axis=-1)
+    stddev = 0.25
+    offsets = tf.linspace(tf.random.normal([], stddev=stddev),
+                          tf.random.normal([], stddev=stddev),
+                          x.shape[-3])
+    offsets_shape = [1] * len(x.shape)
+    offsets_shape[-3] = offsets.shape[0]
+    offsets = tf.reshape(offsets, offsets_shape)
+    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], axis=-1)
     return x, y
 
 
@@ -135,10 +140,7 @@ def get_dataset(config, mode: str = 'train'):
     if config.use_tfm and mode == 'train':
         sample_transforms = [
             random_ups_and_downs,
-            lambda x, y: (mask(x, axis=-3, max_mask_size=6, n_mask=10), y),
             lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
-            # lambda x, y: (mask(x, axis=-3, max_mask_size=12, n_mask=6), y),
-            # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
         ]
     else:
         sample_transforms = []
@@ -229,7 +231,7 @@ def main(config):
     n_classes = 12
     swa_start_epoch = 80
     swa_freq = 2
-    kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.001)
+    kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
 
     tensorboard_path = os.path.join('./tensorboard_log', config.name)
     if not os.path.exists(tensorboard_path):
