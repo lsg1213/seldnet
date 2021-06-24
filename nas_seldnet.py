@@ -22,15 +22,16 @@ args.add_argument('--name', type=str, required=True,
                   help='name must be {name}_{divided index} ex) 2021_1')
 args.add_argument('--dataset_path', type=str, 
                   default='/root/datasets/DCASE2021/feat_label')
-args.add_argument('--n_samples', type=int, default=256)
+args.add_argument('--n_samples', type=int, default=250)
 args.add_argument('--n_blocks', type=int, default=4)
-args.add_argument('--min_flops', type=int, default=400_000_000)
-args.add_argument('--max_flops', type=int, default=480_000_000)
+args.add_argument('--min_flops', type=int, default=200_000_000)
+args.add_argument('--max_flops', type=int, default=240_000_000)
 
 args.add_argument('--batch_size', type=int, default=256)
 args.add_argument('--n_repeat', type=int, default=50)
 args.add_argument('--lr', type=int, default=1e-3)
 args.add_argument('--n_classes', type=int, default=12)
+args.add_argument('--gpus', type=str, default='-1')
 
 
 '''            SEARCH SPACES           '''
@@ -56,24 +57,24 @@ search_space_1d = {
     'bidirectional_GRU_stage':
         {'depth': [1, 2, 3],
          'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
-    # 'transformer_encoder_stage':
-    #     {'depth': [1, 2, 3],
-    #      'n_head': [1, 2, 4, 8, 16],
-    #      'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-    #      'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
-    #      'kernel_size': [1, 3, 5]},
+    'transformer_encoder_stage':
+        {'depth': [1, 2, 3],
+         'n_head': [1, 2, 4, 8, 16],
+         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
+         'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
+         'kernel_size': [1, 3, 5]},
     'simple_dense_stage':
         {'depth': [1, 2, 3],
          'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
          'dense_activation': ['relu'],
          'dropout_rate': [0., 0.2, 0.5]},
-    # 'conformer_encoder_stage':
-    #     {'depth': [1, 2, 3],
-    #      'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-    #      'n_head': [1, 2, 4, 8, 16],
-    #      'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-    #      'multiplier': [1, 2, 4],
-    #      'pos_encoding': [None, 'basic', 'rff']},
+    'conformer_encoder_stage':
+        {'depth': [1, 2, 3],
+         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
+         'n_head': [1, 2, 4, 8, 16],
+         'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+         'multiplier': [1, 2, 4],
+         'pos_encoding': [None, 'basic', 'rff']},
 }
 
 
@@ -205,6 +206,19 @@ def train_and_eval(train_config,
     return performances
 
 
+# reference: https://github.com/IRIS-AUDIO/SELD.git
+def random_ups_and_downs(x, y):
+    stddev = 0.25
+    offsets = tf.linspace(tf.random.normal([], stddev=stddev),
+                          tf.random.normal([], stddev=stddev),
+                          x.shape[-3])
+    offsets_shape = [1] * len(x.shape)
+    offsets_shape[-3] = offsets.shape[0]
+    offsets = tf.reshape(offsets, offsets_shape)
+    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], axis=-1)
+    return x, y
+
+
 def get_dataset(config, mode: str = 'train'):
     path = config.dataset_path
     x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
@@ -212,7 +226,7 @@ def get_dataset(config, mode: str = 'train'):
                              mode=mode, n_freq_bins=64)
     if mode == 'train':
         sample_transforms = [
-            lambda x, y: (mask(x, axis=-3, max_mask_size=24), y),
+            random_ups_and_downs,
             lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
         ]
         batch_transforms = [foa_intensity_vec_aug]
@@ -236,6 +250,7 @@ def get_dataset(config, mode: str = 'train'):
 
 if __name__=='__main__':
     train_config = args.parse_args()
+    os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
     name = train_config.name
     if not name.endswith('.json'):
         name = f'{name}.json'
