@@ -3,3 +3,6 @@
 **/*.hdf5
 DCASE2020/
 config/
+mistake/
+output/
+*.json

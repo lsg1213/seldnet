@@ -12,6 +12,31 @@ Use only custom layers or predefined
 """
 
 """            STAGES            """
+def simple_conv_block(model_config: dict):
+    # mandatory parameters
+    filters = model_config['filters']
+    pool_size = model_config['pool_size']
+
+    dropout_rate = model_config.get('dropout_rate', 0.)
+    kernel_regularizer = tf.keras.regularizers.l1_l2(
+        **model_config.get('kernel_regularizer', {'l1': 0., 'l2': 0.}))
+
+    if len(filters) == 0:
+        filters = filters * len(pool_size)
+    elif len(filters) != len(pool_size):
+        raise ValueError("len of filters and pool_size do not match")
+    
+    def conv_block(inputs):
+        x = inputs
+        for i in range(len(filters)):
+            x = conv2d_bn(filters[i], kernel_size=3, 
+                          kernel_regularizer=kernel_regularizer)(x)
+            x = MaxPooling2D(pool_size=pool_size[i])(x)
+            x = Dropout(dropout_rate)(x)
+        return x
+    return conv_block
+
+
 def mother_stage(model_config: dict):
     depth = model_config['depth']
     strides = model_config['strides']

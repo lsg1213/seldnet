@@ -13,19 +13,19 @@ def get_param(known=None):
     args.add_argument('--resume', action='store_true')    
     args.add_argument('--abspath', type=str, default='/root/datasets')
     args.add_argument('--config_mode', type=str, default='')
-    args.add_argument('--doa_loss', type=str, default='MMSE', 
+    args.add_argument('--doa_loss', type=str, default='MSE', 
                       choices=['MAE', 'MSE', 'MSLE', 'MMSE'])
     args.add_argument('--model', type=str, default='conv_temporal')
     args.add_argument('--model_config', type=str, default='SS5')
     args.add_argument('--output_path', type=str, default='./output')
-    args.add_argument('--ans_path', type=str, default='/seld-dcase2021/foa_dev_raw/raw_and_label/foa_dev_raw/metadata_dev/')
+    args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/metadata_dev/')
     
 
     # training
     args.add_argument('--lr', type=float, default=0.001)
     args.add_argument('--decay', type=float, default=0.5)
     args.add_argument('--batch', type=int, default=256)
-    args.add_argument('--agc', type=bool, default=True)
+    args.add_argument('--agc', type=bool, default=False)
     args.add_argument('--epoch', type=int, default=1000)
     args.add_argument('--loss_weight', type=str, default='1,1000')
     args.add_argument('--lr_patience', type=int, default=80, 

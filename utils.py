@@ -252,10 +252,12 @@ def write_answer(output_dir, filename, preds, direction):
         if i == 0:
             true_direction = tf.reshape(direction[loc[0], loc[1]::preds.shape[1]], [1,3])
         else:
-            true_direction = tf.concat([true_direction, tf.reshape(direction[loc[0], loc[1]::preds.shape[1]], [1, 3])], axis=0)  
+            true_direction = tf.concat([true_direction, tf.reshape(direction[loc[0], loc[1]::preds.shape[1]], [1, 3])], axis=0)
+    _fid = open(write_path, 'w')
+    if len(loc_answer) == 0:
+        return
     temp = np.concatenate([loc_answer.numpy(), true_direction.numpy()], axis=1)
     # np.savetxt(write_path, temp.astype(float), fmt='%4.3f', delimiter = ",")
-    _fid = open(write_path, 'w')
     for item in temp:
         _fid.write('{},{},{},{},{},{}\n'.format(int(item[0]), int(item[1]), 0, float(item[2]), float(item[3]), float(item[4])))
 

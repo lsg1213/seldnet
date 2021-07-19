@@ -23,7 +23,7 @@ args.add_argument('--name', type=str, required=True,
 args.add_argument('--dataset_path', type=str, 
                   default='/root/datasets/DCASE2021/feat_label')
 args.add_argument('--n_samples', type=int, default=250)
-args.add_argument('--n_blocks', type=int, default=4)
+args.add_argument('--n_blocks', type=int, default=3)
 args.add_argument('--min_flops', type=int, default=200_000_000)
 args.add_argument('--max_flops', type=int, default=240_000_000)
 
@@ -37,44 +37,55 @@ args.add_argument('--gpus', type=str, default='-1')
 '''            SEARCH SPACES           '''
 search_space_2d = {
     'mother_stage':
-        {'depth': [1, 2, 3],
+        {'depth': [1],
+        # {'depth': [1, 2, 3],
          'filters0': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
                       3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+        #  'filters0': [0],
          'filters1': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
                       3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-         'filters2': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-                      3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+        #  'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+        #  'filters2': [0],
+         'filters2': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+        #  'filters2': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+        #               3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
          'kernel_size0': [1, 3, 5],
          'kernel_size1': [1, 3, 5],
          'kernel_size2': [1, 3, 5],
          'connect0': [[0], [1]],
          'connect1': [[0, 0], [0, 1], [1, 0], [1, 1]],
-         'connect2': [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
+        #  'connect2': [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
+        #               [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
+         'connect2': [[0, 0, 0], [0, 1, 0], [0, 1, 1],
                       [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
-         'strides': [(1, 1), (1, 2), (1, 3)]},
+        #  'strides': [(1, 1), (1, 2), (1, 3)]},
+         'strides': [(1, 2)]},
 }
 search_space_1d = {
     'bidirectional_GRU_stage':
         {'depth': [1, 2, 3],
-         'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
+         'units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
     'transformer_encoder_stage':
-        {'depth': [1, 2, 3],
+        {'depth': [1],
+        # {'depth': [1, 2, 3],
          'n_head': [1, 2, 4, 8, 16],
          'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
          'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
-         'kernel_size': [1, 3, 5]},
-    'simple_dense_stage':
-        {'depth': [1, 2, 3],
-         'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-         'dense_activation': ['relu'],
-         'dropout_rate': [0., 0.2, 0.5]},
+         'kernel_size': [1, 3]},
+        #  'kernel_size': [1, 3, 5]},
+    # 'simple_dense_stage':
+    #     {'depth': [1, 2, 3],
+    #      'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+    #      'dense_activation': ['relu'],
+    #      'dropout_rate': [0., 0.2, 0.5]},
     'conformer_encoder_stage':
-        {'depth': [1, 2, 3],
+        {'depth': [1, 2],
          'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
          'n_head': [1, 2, 4, 8, 16],
          'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
          'multiplier': [1, 2, 4],
-         'pos_encoding': [None, 'basic', 'rff']},
+         'pos_encoding': ['basic']},
+        #  'pos_encoding': [None, 'basic', 'rff']},
 }
 
 
@@ -109,6 +120,85 @@ def sample_constraint(min_flops=None, max_flops=None,
                         if args['filters1'] > 0 \
                                 and list(args['strides']) == [1, 1]:
                             return False
+                    # else:
+                    #     return False
+            
+            # 1차
+            if model_config['DOA'] != 'bidirectional_GRU_stage': # DOA GRU 고정
+                return False
+
+            # identity = 0 # identity stage가 무조건 1인 경우만
+            # for block in blocks:
+            #     if model_config[block] == 'mother_stage':
+            #         args = model_config[f'{block}_ARGS']
+            #         n_convs = ((args['filters0'] > 0)
+            #                    + (args['filters1'] > 0)
+            #                    + (args['filters2'] > 0))
+            #         if n_convs == 0:
+            #             identity += 1
+            # if identity != 1:
+            #     return False
+
+            # 2차
+            num_1d = 0 # 1d stage가 최소 1개이상 존재
+            for block in blocks:
+                if model_config[block] != 'mother_stage':
+                    num_1d += 1
+            if num_1d in [4]:
+                return False
+
+            # if model_config['SED'] == 'bidirectional_GRU_stage': # SED GRU 제거
+            #     return False
+
+            # if model_config['BLOCK2'] == 'bidirectional_GRU_stage':
+            #     return False
+
+            # if model_config['BLOCK3'] == 'bidirectional_GRU_stage':
+            #     return False
+
+            # 3차
+            # constraint 조정 없음
+
+            # 4차
+            if model_config['BLOCK1'] != 'bidirectional_GRU_stage':
+                return False
+
+            if model_config['BLOCK0'] != 'mother_stage':
+                return False
+
+            if model_config['BLOCK0_ARGS']['depth'] == 3:
+                return False
+
+            # 5차
+            if model_config['BLOCK2'] != 'transformer_encoder_stage': # block2 transformer 고정
+                return False
+
+            if not model_config['DOA_ARGS']['depth'] in [1, 3]:
+                return False
+                
+            # 6차
+            if model_config['SED'] != 'conformer_encoder_stage': # SED conformer 고정
+                return False
+
+            if model_config['BLOCK1_ARGS']['units'] == 16:
+                return False
+
+            if model_config['BLOCK1_ARGS']['depth'] != 1:
+                return False
+
+            # 7차
+            # 직접 서치 스페이스에서 줄임
+
+            # 8차
+            if model_config['BLOCK1_ARGS']['units'] in [8, 24]:
+                return False
+
+            # 9차
+            if model_config['DOA_ARGS']['depth'] != 3:
+                return False
+            
+            
+            
 
             cx, sed_shape = get_complexity(model_config['SED'])(
                 model_config['SED_ARGS'], shape)
@@ -171,7 +261,7 @@ def train_and_eval(train_config,
                    model_config: dict,
                    input_shape,
                    trainset: tf.data.Dataset,
-                   testset: tf.data.Dataset,
+                   valset: tf.data.Dataset,
                    evaluator):
     model = models.conv_temporal(input_shape, model_config)
     optimizer = tf.keras.optimizers.Adam(train_config.lr)
@@ -182,18 +272,18 @@ def train_and_eval(train_config,
                   loss_weights=[1, 1000])
 
     history = model.fit(trainset,
-                        validation_data=testset)
+                        validation_data=valset)
 
     evaluator.reset_states()
-    for x, y in testset:
+    for x, y in valset:
         evaluator.update_states(y, model(x, training=False))
     scores = evaluator.result()
     scores = {
-        'test_error_rate': scores[0].numpy().tolist(),
-        'test_f1score': scores[1].numpy().tolist(),
-        'test_der': scores[2].numpy().tolist(),
-        'test_derf': scores[3].numpy().tolist(),
-        'test_seld_score': calculate_seld_score(scores).numpy().tolist(),
+        'val_error_rate': scores[0].numpy().tolist(),
+        'val_f1score': scores[1].numpy().tolist(),
+        'val_der': scores[2].numpy().tolist(),
+        'val_derf': scores[3].numpy().tolist(),
+        'val_seld_score': calculate_seld_score(scores).numpy().tolist(),
     }
 
     performances = {
@@ -251,6 +341,18 @@ def get_dataset(config, mode: str = 'train'):
 if __name__=='__main__':
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
+    del train_config.gpus
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    print(gpus)
+    if gpus:
+        try:
+            tf.config.experimental.set_virtual_device_configuration(
+                gpus[0],
+                [tf.config.experimental.VirtualDeviceConfiguration(
+                    memory_limit=10240)])
+        except RuntimeError as e:
+            print(e)
+
     name = train_config.name
     if not name.endswith('.json'):
         name = f'{name}.json'
@@ -259,7 +361,7 @@ if __name__=='__main__':
 
     # datasets
     trainset = get_dataset(train_config, mode='train')
-    testset = get_dataset(train_config, mode='test')
+    valset = get_dataset(train_config, mode='val')
 
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
@@ -298,7 +400,7 @@ if __name__=='__main__':
         outputs = train_and_eval(
             train_config, model_config, 
             input_shape, 
-            trainset, testset, evaluator)
+            trainset, valset, evaluator)
         outputs['time'] = time.time() - start
 
         results[f'{i:03d}'] = {'config': model_config, 'perf': outputs}

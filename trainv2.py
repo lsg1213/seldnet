@@ -22,7 +22,7 @@ from utils import adaptive_clip_grad, AdaBelief, apply_kernel_regularizer
 
 
 
-def generate_trainstep(sed_loss, doa_loss, loss_weights, label_smoothing=0.2):
+def generate_trainstep(sed_loss, doa_loss, loss_weights, config, label_smoothing=0):
     # These are statistics from the train dataset
     train_samples = tf.convert_to_tensor(
         [[58193, 32794, 29801, 21478, 14822, 
@@ -40,18 +40,22 @@ def generate_trainstep(sed_loss, doa_loss, loss_weights, label_smoothing=0.2):
             if label_smoothing > 0:
                 sed = sed * (1-label_smoothing) + 0.5 * label_smoothing
 
-            sloss = tf.reduce_mean(sed_loss(sed, sed_pred) * cls_weights)
-            dloss = doa_loss(doa, doa_pred, cls_weights)
+            # sloss = tf.reduce_mean(sed_loss(sed, sed_pred) * cls_weights)
+            # dloss = doa_loss(doa, doa_pred, cls_weights)
+            sloss = tf.reduce_mean(sed_loss(sed, sed_pred))
+            dloss = doa_loss(doa, doa_pred)
+
             
             loss = sloss * loss_weights[0] + dloss * loss_weights[1]
 
             # regularizer
-            loss += tf.add_n([l.losses[0] for l in model.layers
-                              if len(l.losses) > 0])
+            # loss += tf.add_n([l.losses[0] for l in model.layers
+            #                   if len(l.losses) > 0])
 
         grad = tape.gradient(loss, model.trainable_variables)
         # apply AGC
-        grad = adaptive_clip_grad(model.trainable_variables, grad)
+        if config.agc:
+            grad = adaptive_clip_grad(model.trainable_variables, grad)
         optimizer.apply_gradients(zip(grad, model.trainable_variables))
 
         return y_p, sloss, dloss
@@ -69,9 +73,9 @@ def generate_teststep(sed_loss, doa_loss):
 
 
 def generate_iterloop(sed_loss, doa_loss, evaluator, writer, 
-                      mode, loss_weights=None):
+                      mode, loss_weights=None, config=None):
     if mode == 'train':
-        step = generate_trainstep(sed_loss, doa_loss, loss_weights)
+        step = generate_trainstep(sed_loss, doa_loss, loss_weights, config)
     else:
         step = generate_teststep(sed_loss, doa_loss)
 
@@ -140,7 +144,8 @@ def get_dataset(config, mode: str = 'train'):
     if config.use_tfm and mode == 'train':
         sample_transforms = [
             random_ups_and_downs,
-            lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
+            # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
+            lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
         ]
     else:
         sample_transforms = []
@@ -275,13 +280,18 @@ def main(config):
 
     model = apply_kernel_regularizer(model, kernel_regularizer)
 
-    optimizer = AdaBelief(config.lr)
+    optimizer = tf.keras.optimizers.Adam(config.lr)
+    # optimizer = AdaBelief(config.lr)
     if config.sed_loss == 'BCE':
         sed_loss = tf.keras.backend.binary_crossentropy
     else:
         sed_loss = losses.focal_loss
     # fix doa_loss to MMSE_with_cls_weights (because of class weights)
-    doa_loss = losses.MMSE_with_cls_weights
+    # doa_loss = losses.MMSE_with_cls_weights
+    try:
+        doa_loss = getattr(tf.keras.losses, config.doa_loss)
+    except:
+        doa_loss = getattr(losses, config.doa_loss)
 
     # stochastic weight averaging
     swa = SWA(model, swa_start_epoch, swa_freq)
@@ -300,7 +310,7 @@ def main(config):
 
     train_iterloop = generate_iterloop(
         sed_loss, doa_loss, evaluator, writer, 'train', 
-        loss_weights=list(map(int, config.loss_weight.split(','))))
+        loss_weights=list(map(int, config.loss_weight.split(','))), config=config)
     val_iterloop = generate_iterloop(
         sed_loss, doa_loss, evaluator, writer, 'val')
     test_iterloop = generate_iterloop(

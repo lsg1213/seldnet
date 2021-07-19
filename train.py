@@ -125,9 +125,9 @@ def iterloop(model, dataset, sed_loss, doa_loss, metric_class, config, epoch, wr
                              }))
             
             i += 1
-    print("F", F_2.result().numpy())
-    print("Error rate", ER_2.result().numpy())
-    print("seldscore", SeldScore_2.result().numpy())
+    # print("F", F_2.result().numpy())
+    # print("Error rate", ER_2.result().numpy())
+    # print("seldscore", SeldScore_2.result().numpy())
 
     recall, precision = metric_class.class_result()
 
