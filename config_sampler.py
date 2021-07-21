@@ -2,7 +2,11 @@ import copy
 import random
 from collections import OrderedDict
 
-from utils import dict_add
+from utils import *
+
+
+def get_config(train_config, search_space):
+    raise Unimplementation
 
 
 def config_sampling(search_space: OrderedDict):

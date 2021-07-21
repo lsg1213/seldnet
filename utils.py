@@ -5,6 +5,15 @@ import csv
 import os
 import pandas as pd
 
+
+class Unimplementation(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __str__(self):
+        return self.msg
+
+
 class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, d_model, decay):
         super(CustomSchedule, self).__init__()
