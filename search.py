@@ -8,6 +8,7 @@ from data_loader import *
 from metrics import *
 from transforms import *
 from config_sampler import get_config
+from search_utils import postprocess_fn
 
 
 args = argparse.ArgumentParser()
@@ -27,60 +28,53 @@ args.add_argument('--lr', type=int, default=1e-3)
 args.add_argument('--n_classes', type=int, default=12)
 args.add_argument('--gpus', type=str, default='-1')
 
+input_shape = [300, 64, 7]
+
 
 '''            SEARCH SPACES           '''
 search_space = {
     'search_space_2d': {
+        'num': [0, 1, 2, 3, 4, 5],
         'mother_stage':
-            {'depth': [1],
-            # {'depth': [1, 2, 3],
+            {'depth': [1, 2, 3],
             'filters0': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
                         3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            #  'filters0': [0],
             'filters1': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
                         3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            #  'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            #  'filters2': [0],
-            'filters2': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            #  'filters2': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-            #               3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+            'filters2': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+                        3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
             'kernel_size0': [1, 3, 5],
             'kernel_size1': [1, 3, 5],
             'kernel_size2': [1, 3, 5],
             'connect0': [[0], [1]],
             'connect1': [[0, 0], [0, 1], [1, 0], [1, 1]],
-            #  'connect2': [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
-            #               [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
-            'connect2': [[0, 0, 0], [0, 1, 0], [0, 1, 1],
+            'connect2': [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
                         [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
-            #  'strides': [(1, 1), (1, 2), (1, 3)]},
-            'strides': [(1, 2)]},
+            'strides': [(1, 1), (1, 2), (1, 3)]},
     },
     'search_space_1d': {
+        'num': [0, 1, 2, 3, 4, 5],
         'bidirectional_GRU_stage':
             {'depth': [1, 2, 3],
             'units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
         'transformer_encoder_stage':
-            {'depth': [1],
-            # {'depth': [1, 2, 3],
+            {'depth': [1, 2, 3],
             'n_head': [1, 2, 4, 8, 16],
             'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
             'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
-            'kernel_size': [1, 3]},
-            #  'kernel_size': [1, 3, 5]},
-        # 'simple_dense_stage':
-        #     {'depth': [1, 2, 3],
-        #      'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-        #      'dense_activation': ['relu'],
-        #      'dropout_rate': [0., 0.2, 0.5]},
+            'kernel_size': [1, 3, 5]},
+        'simple_dense_stage':
+            {'depth': [1, 2, 3],
+             'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+             'dense_activation': ['relu'],
+             'dropout_rate': [0., 0.2, 0.5]},
         'conformer_encoder_stage':
             {'depth': [1, 2],
             'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
             'n_head': [1, 2, 4, 8, 16],
             'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
             'multiplier': [1, 2, 4],
-            'pos_encoding': ['basic']},
-            #  'pos_encoding': [None, 'basic', 'rff']},
+            'pos_encoding': [None, 'basic', 'rff']},
     }
 }
 
@@ -219,19 +213,48 @@ if __name__=='__main__':
     index = 0
     while True:
         index += 1 # 차수
-        current_result_path = os.path.join(result_path, str(index) + '.json')
-        
+        current_result_path = os.path.join(result_path, f'result_{str(index)}.json')
+        results = []
+
         # resume
+        if os.path.exists(current_result_path):
+            with open(current_result_path, f'result_{str(index)}.json', 'r') as f:
+                results = json.load(f)
+
 
         # search space
-        if os.path.exists(os.path.join(result_path, f'search_space_{index}.json')):
-            with open(os.path.join(result_path, f'search_space_{index}.json'), 'r') as f:
+        search_space_path = os.path.join(result_path, f'search_space_{index}.json')
+        if os.path.exists(search_space_path):
+            with open(search_space_path, 'r') as f:
                 search_space = json.load(f)
         else:
-            with open(os.path.join(result_path, f'search_space_{index}.json'), 'w') as f:
+            with open(search_space_path, 'w') as f:
                 json.dump(search_space, f)
 
-        model_configs = get_config(train_config, search_space)
+        start_epoch = len(results)
+        for i in range(start_epoch, train_config.n_samples):
+            model_configs = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
+
+            # 학습
+            model_config = conv_temporal_sampler(
+            search_space_2d,
+            search_space_1d,
+            n_blocks=train_config.n_blocks,
+            input_shape=input_shape,
+            default_config=default_config,
+            config_postprocess_fn=postprocess_fn)
+
+            # eval
+
+            # 결과 저장
+            with open(current_result_path, f'result_{str(index)}.json', 'w') as f:
+                json.dump(results, f, indent=4)
+
+        # search space 줄이기
+
+        # search space 기록 남기기
+
+        # search space 저장
 
 
 
