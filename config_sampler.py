@@ -3,10 +3,17 @@ import random
 from collections import OrderedDict
 
 from utils import *
+from search_utils import search_space_sanity_check
 
 
-def get_config(train_config, search_space):
-    raise Unimplementation
+def get_config(train_config, search_space, input_shape, postprocess_fn=None):
+    num = train_config.n_samples
+
+    search_space_sanity_check(search_space)
+
+    
+
+
 
 
 def config_sampling(search_space: OrderedDict):
@@ -141,14 +148,14 @@ def vad_architecture_sampler(search_space_2d: dict,
             return model_config
 
 
-def search_space_sanity_check(search_space: dict):
-    for name in search_space:
-        # check whether each value is valid
-        for v in search_space[name].values():
-            if not isinstance(v, (list, tuple)):
-                raise ValueError(f'values of {name} must be tuple or list')
-            if len(v) == 0:
-                raise ValueError(f'len of value in {name} must be > 0')
+# def search_space_sanity_check(search_space: dict):
+#     for name in search_space:
+#         # check whether each value is valid
+#         for v in search_space[name].values():
+#             if not isinstance(v, (list, tuple)):
+#                 raise ValueError(f'values of {name} must be tuple or list')
+#             if len(v) == 0:
+#                 raise ValueError(f'len of value in {name} must be > 0')
 
 
 def complexity(model_config: OrderedDict, 
