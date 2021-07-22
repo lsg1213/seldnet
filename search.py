@@ -236,13 +236,6 @@ if __name__=='__main__':
             model_configs = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
 
             # 학습
-            model_config = conv_temporal_sampler(
-            search_space_2d,
-            search_space_1d,
-            n_blocks=train_config.n_blocks,
-            input_shape=input_shape,
-            default_config=default_config,
-            config_postprocess_fn=postprocess_fn)
 
             # eval
 
