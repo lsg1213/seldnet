@@ -23,7 +23,8 @@ args.add_argument('--n_blocks', type=int, default=3)
 # args.add_argument('--max_flops', type=int, default=240_000_000)
 
 args.add_argument('--batch_size', type=int, default=256)
-args.add_argument('--n_repeat', type=int, default=50)
+args.add_argument('--n_repeat', type=int, default=5)
+args.add_argument('--epoch', type=int, default=10)
 args.add_argument('--lr', type=int, default=1e-3)
 args.add_argument('--n_classes', type=int, default=12)
 args.add_argument('--gpus', type=str, default='-1')
@@ -94,7 +95,7 @@ def train_and_eval(train_config,
                   loss_weights=[1, 1000])
 
     history = model.fit(trainset,
-                        validation_data=valset)
+                        validation_data=valset, epoch=train_config.epoch)
 
     evaluator.reset_states()
     for x, y in valset:
@@ -184,7 +185,7 @@ if __name__=='__main__':
     # datasets
     # trainset = get_dataset(train_config, mode='train')
     # valset = get_dataset(train_config, mode='val')
-
+    
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
 
@@ -236,6 +237,12 @@ if __name__=='__main__':
             model_configs = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
 
             # 학습
+            start = time.time()
+            outputs = train_and_eval(
+                train_config, model_config, 
+                input_shape, 
+                trainset, valset, evaluator)
+            outputs['time'] = time.time() - start
 
             # eval
 

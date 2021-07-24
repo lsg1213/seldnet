@@ -7,7 +7,7 @@ import pandas as pd
 
 
 class Unimplementation(Exception):
-    def __init__(self, msg):
+    def __init__(self, msg='unimplementation error'):
         self.msg = msg
 
     def __str__(self):
