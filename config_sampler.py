@@ -4,6 +4,31 @@ from collections import OrderedDict
 
 from utils import *
 from search_utils import search_space_sanity_check
+from random import choice
+
+
+def get_sampled_config(search_space, model_config, name='BLOCK'):
+    keys = [i for i in search_space.keys() if i != 'num']
+    number = choice(search_space['num'])
+    if name != 'BLOCK':
+        while number == 0:
+            number = choice(search_space['num'])
+
+    for i in range(number):
+        config_name = name + str(len([i for i in model_config.keys() if name in i]) // 2) if name == 'BLOCK' else name
+        block = choice(keys)
+        model_config[config_name] = block
+
+        model_arg_config = {}
+        for k, v in search_space[block].items():
+            if block == 'mother_stage':
+                if k == 'filters1':
+                    v = [i for i in v if i > 0]
+                    
+            v = choice(v)
+            model_arg_config[k] = v
+        
+        model_config[config_name + '_ARGS'] = model_arg_config
 
 
 def get_config(train_config, search_space, input_shape, postprocess_fn=None):
@@ -11,10 +36,20 @@ def get_config(train_config, search_space, input_shape, postprocess_fn=None):
 
     search_space_sanity_check(search_space)
 
+    model_config = {
+        'n_classes': train_config.n_classes
+    }
+
+    get_sampled_config(search_space['search_space_2d'], model_config)
+    get_sampled_config(search_space['search_space_1d'], model_config)
+
+    get_sampled_config(search_space['search_space_1d'], model_config, name='SED')
+    get_sampled_config(search_space['search_space_1d'], model_config, name='DOA')
+
+    if postprocess_fn:
+        model_config = postprocess_fn(model_config)
+    return model_config
     
-
-
-
 
 def config_sampling(search_space: OrderedDict):
     sample = copy.deepcopy(search_space)

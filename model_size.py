@@ -1,11 +1,5 @@
 import os
 
-import models
-from params import get_param
-from data_loader import load_seldnet_data, seldnet_data_to_dataloader
-from transforms import split_total_labels_to_sed_doa
-from trainv2 import get_dataset
-
 
 def get_model_size(model):
     with open('model.txt','w') as fh:
@@ -40,6 +34,9 @@ def get_model_size(model):
 
 
 if __name__=='__main__':
+    import models
+    from trainv2 import get_dataset
+    from params import get_param
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     config, model_config = get_param()
     

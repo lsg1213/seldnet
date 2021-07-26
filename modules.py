@@ -150,28 +150,33 @@ def mother_block(model_config: dict):
 
     strides = safe_tuple(model_config.get('strides', (1, 1)))
     activation = model_config.get('activation', 'relu')
+    try:
+        if (filters0 == 0) != (kernel_size0 == 0):
+            raise ValueError('0) skipped layer must have 0 filters, 0 kernel size')
+        if (filters1 == 0) != (kernel_size1 == 0):
+            raise ValueError('1) skipped layer must have 0 filters, 0 kernel size')
+        if (filters2 == 0) != (kernel_size2 == 0):
+            raise ValueError('2) skipped layer must have 0 filters, 0 kernel size')
 
-    if (filters0 == 0) != (kernel_size0 == 0):
-        raise ValueError('0) skipped layer must have 0 filters, 0 kernel size')
-    if (filters1 == 0) != (kernel_size1 == 0):
-        raise ValueError('1) skipped layer must have 0 filters, 0 kernel size')
-    if (filters2 == 0) != (kernel_size2 == 0):
-        raise ValueError('2) skipped layer must have 0 filters, 0 kernel size')
+        if filters0 == 0 and max(connect1[1], connect2[1]):
+            raise ValueError('cannot link skipped layer (first layer)')
+        if filters1 == 0 and connect2[2] > 0:
+            raise ValueError('cannot link skipped layer (second layer)')
 
-    if filters0 == 0 and max(connect1[1], connect2[1]):
-        raise ValueError('cannot link skipped layer (first layer)')
-    if filters1 == 0 and connect2[2] > 0:
-        raise ValueError('cannot link skipped layer (second layer)')
+        if (filters0 != 0) + sum(connect0) == 0:
+            raise ValueError('cannot pass zero inputs to the second layer')
+        if (filters1 != 0) + sum(connect1) == 0:
+            raise ValueError('cannot pass zero inputs to the third layer')
+        if (filters2 != 0) + sum(connect2) == 0:
+            raise ValueError('cannot pass zero inputs to the final output')
 
-    if (filters0 != 0) + sum(connect0) == 0:
-        raise ValueError('cannot pass zero inputs to the second layer')
-    if (filters1 != 0) + sum(connect1) == 0:
-        raise ValueError('cannot pass zero inputs to the third layer')
-    if (filters2 != 0) + sum(connect2) == 0:
-        raise ValueError('cannot pass zero inputs to the final output')
-
-    if filters1 == 0 and tuple(strides) != (1, 1):
-        raise ValueError('if strides are set, the second layer must be active')
+        if filters1 == 0 and tuple(strides) != (1, 1):
+            raise ValueError('if strides are set, the second layer must be active')
+    except:
+        print(filters0, filters1, filters2)
+        print(kernel_size0, kernel_size1, kernel_size2)
+        print(connect0, connect1, connect2)
+        import pdb; pdb.set_trace()
 
     def block(inputs):
         outputs = [inputs]

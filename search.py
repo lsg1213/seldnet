@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import time
 
 import tensorflow as tf
 
@@ -9,6 +10,9 @@ from metrics import *
 from transforms import *
 from config_sampler import get_config
 from search_utils import postprocess_fn
+from model_flop import get_flops
+from model_size import get_model_size
+import models
 
 
 args = argparse.ArgumentParser()
@@ -28,6 +32,7 @@ args.add_argument('--epoch', type=int, default=10)
 args.add_argument('--lr', type=int, default=1e-3)
 args.add_argument('--n_classes', type=int, default=12)
 args.add_argument('--gpus', type=str, default='-1')
+args.add_argument('--new', action='store_true')
 
 input_shape = [300, 64, 7]
 
@@ -35,15 +40,12 @@ input_shape = [300, 64, 7]
 '''            SEARCH SPACES           '''
 search_space = {
     'search_space_2d': {
-        'num': [0, 1, 2, 3, 4, 5],
+        'num': [0, 1],
         'mother_stage':
             {'depth': [1, 2, 3],
-            'filters0': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-                        3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            'filters1': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-                        3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            'filters2': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-                        3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+            'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+            'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+            'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
             'kernel_size0': [1, 3, 5],
             'kernel_size1': [1, 3, 5],
             'kernel_size2': [1, 3, 5],
@@ -54,7 +56,7 @@ search_space = {
             'strides': [(1, 1), (1, 2), (1, 3)]},
     },
     'search_space_1d': {
-        'num': [0, 1, 2, 3, 4, 5],
+        'num': [0, 1],
         'bidirectional_GRU_stage':
             {'depth': [1, 2, 3],
             'units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
@@ -86,35 +88,59 @@ def train_and_eval(train_config,
                    trainset: tf.data.Dataset,
                    valset: tf.data.Dataset,
                    evaluator):
-    model = models.conv_temporal(input_shape, model_config)
+    try:
+        model = models.conv_temporal(input_shape, model_config)
+    except:
+        print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
+        os.makedirs('error_models')
+        configs = []
+        if os.path.exists(os.path.join('error_models', 'error_model.json')):
+            with open(os.path.join('error_models', 'error_model.json'), 'r') as f:
+                configs = json.load(f)
+        else:
+            configs = [model_config]
+        with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
+            json.dump(model_config, f, indent=4)
+
     optimizer = tf.keras.optimizers.Adam(train_config.lr)
 
     model.compile(optimizer=optimizer,
                   loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
                         'doa_out': tf.keras.losses.MSE},
                   loss_weights=[1, 1000])
+    performances = {}
+    for epoch in range(train_config.epoch):
+        history = model.fit(trainset,
+                            validation_data=valset).history
+        if len(performances) == 0:
+            for k, v in history.items():
+                performances[k] = [v]
+        else:
+            for k, v in history.items():
+                performances[k] += v
 
-    history = model.fit(trainset,
-                        validation_data=valset, epoch=train_config.epoch)
+        evaluator.reset_states()
+        for x, y in valset:
+            evaluator.update_states(y, model(x, training=False))
+        scores = evaluator.result()
+        scores = {
+            'val_error_rate': scores[0].numpy().tolist(),
+            'val_f1score': scores[1].numpy().tolist(),
+            'val_der': scores[2].numpy().tolist(),
+            'val_derf': scores[3].numpy().tolist(),
+            'val_seld_score': calculate_seld_score(scores).numpy().tolist(),
+        }
+        if 'val_error_rate' in performances.keys():
+            for k, v in scores.items():
+                performances[k].append(v)
+        else:
+            for k, v in scores.items():
+                performances[k] = [v]
 
-    evaluator.reset_states()
-    for x, y in valset:
-        evaluator.update_states(y, model(x, training=False))
-    scores = evaluator.result()
-    scores = {
-        'val_error_rate': scores[0].numpy().tolist(),
-        'val_f1score': scores[1].numpy().tolist(),
-        'val_der': scores[2].numpy().tolist(),
-        'val_derf': scores[3].numpy().tolist(),
-        'val_seld_score': calculate_seld_score(scores).numpy().tolist(),
-    }
-
-    performances = {
-        **history.history,
-        **scores,
-        **(model_complexity.conv_temporal_complexity(model_config, 
-                                                     input_shape)[0])
-    }
+    performances.update({
+        'flops': get_flops(model),
+        'size': get_model_size(model)
+    })
     del model, optimizer, history
     return performances
 
@@ -183,8 +209,8 @@ if __name__=='__main__':
     input_shape = [300, 64, 7]
 
     # datasets
-    # trainset = get_dataset(train_config, mode='train')
-    # valset = get_dataset(train_config, mode='val')
+    trainset = get_dataset(train_config, mode='train')
+    valset = get_dataset(train_config, mode='val')
     
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
@@ -202,6 +228,8 @@ if __name__=='__main__':
     
     # train config
     train_config_path = os.path.join(result_path, 'train_config.json')
+    if train_config.new:
+        os.system(f'rm -rf {train_config_path}')
     if not os.path.exists(train_config_path):
         with open(train_config_path, 'w') as f:
             json.dump(vars(train_config), f, indent=4)
@@ -230,7 +258,7 @@ if __name__=='__main__':
                 search_space = json.load(f)
         else:
             with open(search_space_path, 'w') as f:
-                json.dump(search_space, f)
+                json.dump(search_space, f, indent=4)
 
         start_epoch = len(results)
         for i in range(start_epoch, train_config.n_samples):
@@ -239,15 +267,16 @@ if __name__=='__main__':
             # 학습
             start = time.time()
             outputs = train_and_eval(
-                train_config, model_config, 
+                train_config, model_configs, 
                 input_shape, 
                 trainset, valset, evaluator)
             outputs['time'] = time.time() - start
 
             # eval
+            # outputs['objective_score'] = get_objective_score(outputs)
 
             # 결과 저장
-            with open(current_result_path, f'result_{str(index)}.json', 'w') as f:
+            with open(current_result_path, f'result_{index}.json', 'w') as f:
                 json.dump(results, f, indent=4)
 
         # search space 줄이기

@@ -1,12 +1,6 @@
 import os
 import tensorflow as tf
-from tensorflow.python.framework.convert_to_constants import  convert_variables_to_constants_v2_as_graph
-
-from params import get_param
-from train import get_dataset
-import models
-from model_complexity import conv_temporal_complexity
-from complexity import conv2d_complexity
+from tensorflow.python.framework.convert_to_constants import convert_variables_to_constants_v2_as_graph
 
 
 def get_flops(model):
@@ -23,6 +17,10 @@ def get_flops(model):
 
 
 if __name__=='__main__':
+    from params import get_param
+    from train import get_dataset
+    import models
+
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     config, model_config = get_param()
     

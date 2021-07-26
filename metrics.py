@@ -4,6 +4,10 @@ from data_utils import radian_to_degree
 from utils import safe_div
 
 
+def get_objective_score(outputs):
+    outputs
+
+
 class SELDMetrics:
     def __init__(self, doa_threshold=20, block_size=10, n_classes=14):
         self.doa_threshold = doa_threshold
