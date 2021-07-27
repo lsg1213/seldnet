@@ -43,9 +43,9 @@ search_space = {
         'num': [0, 1],
         'mother_stage':
             {'depth': [1, 2, 3],
-            'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
-            'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+            'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+            'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+            'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
             'kernel_size0': [1, 3, 5],
             'kernel_size1': [1, 3, 5],
             'kernel_size2': [1, 3, 5],
@@ -59,7 +59,7 @@ search_space = {
         'num': [0, 1],
         'bidirectional_GRU_stage':
             {'depth': [1, 2, 3],
-            'units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
+            'units': [16, 24, 32, 48, 64, 96, 128]}, 
         'transformer_encoder_stage':
             {'depth': [1, 2, 3],
             'n_head': [1, 2, 4, 8, 16],
@@ -68,14 +68,14 @@ search_space = {
             'kernel_size': [1, 3, 5]},
         'simple_dense_stage':
             {'depth': [1, 2, 3],
-             'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+             'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
              'dense_activation': ['relu'],
              'dropout_rate': [0., 0.2, 0.5]},
         'conformer_encoder_stage':
             {'depth': [1, 2],
             'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
             'n_head': [1, 2, 4, 8, 16],
-            'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+            'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192],
             'multiplier': [1, 2, 4],
             'pos_encoding': [None, 'basic', 'rff']},
     }
@@ -114,7 +114,7 @@ def train_and_eval(train_config,
                             validation_data=valset).history
         if len(performances) == 0:
             for k, v in history.items():
-                performances[k] = [v]
+                performances[k] = v
         else:
             for k, v in history.items():
                 performances[k] += v
@@ -215,12 +215,6 @@ if __name__=='__main__':
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
 
-    default_config = {
-        'n_classes': train_config.n_classes
-    }
-    results = {'train_config': vars(train_config)}
-    start_idx = 0
-
     # result folder
     result_path = os.path.join('result', name)
     if not os.path.exists(result_path):
@@ -229,7 +223,7 @@ if __name__=='__main__':
     # train config
     train_config_path = os.path.join(result_path, 'train_config.json')
     if train_config.new:
-        os.system(f'rm -rf {train_config_path}')
+        os.system(f'rm -rf {os.path.join(result_path, "*")}')
     if not os.path.exists(train_config_path):
         with open(train_config_path, 'w') as f:
             json.dump(vars(train_config), f, indent=4)
@@ -242,14 +236,13 @@ if __name__=='__main__':
     index = 0
     while True:
         index += 1 # 차수
-        current_result_path = os.path.join(result_path, f'result_{str(index)}.json')
+        current_result_path = os.path.join(result_path, f'result_{index}.json')
         results = []
 
         # resume
         if os.path.exists(current_result_path):
-            with open(current_result_path, f'result_{str(index)}.json', 'r') as f:
+            with open(current_result_path, 'r') as f:
                 results = json.load(f)
-
 
         # search space
         search_space_path = os.path.join(result_path, f'search_space_{index}.json')
@@ -260,8 +253,8 @@ if __name__=='__main__':
             with open(search_space_path, 'w') as f:
                 json.dump(search_space, f, indent=4)
 
-        start_epoch = len(results)
-        for i in range(start_epoch, train_config.n_samples):
+        current_number = len(results)
+        for number in range(current_number, train_config.n_samples):
             model_configs = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
 
             # 학습
@@ -273,12 +266,13 @@ if __name__=='__main__':
             outputs['time'] = time.time() - start
 
             # eval
-            # outputs['objective_score'] = get_objective_score(outputs)
+            outputs['objective_score'] = get_objective_score(outputs)
 
             # 결과 저장
-            with open(current_result_path, f'result_{index}.json', 'w') as f:
+            results.append(outputs)
+            with open(current_result_path, 'w') as f:
                 json.dump(results, f, indent=4)
-
+        break
         # search space 줄이기
 
         # search space 기록 남기기

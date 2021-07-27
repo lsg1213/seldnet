@@ -1,11 +1,33 @@
 import tensorflow as tf
+from numpy import log10, abs, sign, exp
 
 from data_utils import radian_to_degree
 from utils import safe_div
 
 
-def get_objective_score(outputs):
-    outputs
+def ema(data, n=10):
+    emas = []
+    for i in data:
+        if len(emas) == 0:
+            emas.append(i)
+        else:
+            emas.append(i * (2 / (1 + n)) + emas[-1] * (1 - (2 / (1 + n))))
+    return emas
+
+
+def get_objective_score(outputs, weights=[1,1,1]):
+    val_loss = outputs['val_loss']
+    val_seld_score = outputs['val_seld_score'][-1]
+    
+    K = ema(val_loss, n=len(val_loss))
+    if len(K) < 2:
+        raise ValueError('epoch should be > 1')
+    
+    score = weights[0] * (val_seld_score) +\
+            weights[1] * (K[-1] - K[-2]) +\
+            weights[2] * exp(val_loss[-1] - val_loss[0])
+            # weights[2] * sign(val_loss[-1] - val_loss[0]) * (log10(abs(val_loss[-1] - val_loss[0])))
+    return score
 
 
 class SELDMetrics:
