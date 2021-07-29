@@ -38,47 +38,45 @@ input_shape = [300, 64, 7]
 
 
 '''            SEARCH SPACES           '''
-search_space = {
-    'search_space_2d': {
-        'num': [0, 1],
-        'mother_stage':
-            {'depth': [1, 2, 3],
-            'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
-            'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
-            'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
-            'kernel_size0': [1, 3, 5],
-            'kernel_size1': [1, 3, 5],
-            'kernel_size2': [1, 3, 5],
-            'connect0': [[0], [1]],
-            'connect1': [[0, 0], [0, 1], [1, 0], [1, 1]],
-            'connect2': [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
-                        [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
-            'strides': [(1, 1), (1, 2), (1, 3)]},
-    },
-    'search_space_1d': {
-        'num': [0, 1],
-        'bidirectional_GRU_stage':
-            {'depth': [1, 2, 3],
-            'units': [16, 24, 32, 48, 64, 96, 128]}, 
-        'transformer_encoder_stage':
-            {'depth': [1, 2, 3],
-            'n_head': [1, 2, 4, 8, 16],
-            'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-            'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
-            'kernel_size': [1, 3, 5]},
-        'simple_dense_stage':
-            {'depth': [1, 2, 3],
-             'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
-             'dense_activation': ['relu'],
-             'dropout_rate': [0., 0.2, 0.5]},
-        'conformer_encoder_stage':
-            {'depth': [1, 2],
-            'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-            'n_head': [1, 2, 4, 8, 16],
-            'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192],
-            'multiplier': [1, 2, 4],
-            'pos_encoding': [None, 'basic', 'rff']},
-    }
+search_space_2d = {
+    'num': [0, 1],
+    'mother_stage':
+        {'depth': [1, 2, 3],
+        'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+        'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+        'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+        'kernel_size0': [1, 3, 5],
+        'kernel_size1': [1, 3, 5],
+        'kernel_size2': [1, 3, 5],
+        'connect0': [[0], [1]],
+        'connect1': [[0, 0], [0, 1], [1, 0], [1, 1]],
+        'connect2': [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
+                    [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
+        'strides': [(1, 1), (1, 2), (1, 3)]},
+}
+search_space_1d = {
+    'num': [0, 1],
+    'bidirectional_GRU_stage':
+        {'depth': [1, 2, 3],
+        'units': [16, 24, 32, 48, 64, 96, 128]}, 
+    'transformer_encoder_stage':
+        {'depth': [1, 2, 3],
+        'n_head': [1, 2, 4, 8, 16],
+        'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
+        'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
+        'kernel_size': [1, 3, 5]},
+    'simple_dense_stage':
+        {'depth': [1, 2, 3],
+            'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+            'dense_activation': ['relu'],
+            'dropout_rate': [0., 0.2, 0.5]},
+    'conformer_encoder_stage':
+        {'depth': [1, 2],
+        'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
+        'n_head': [1, 2, 4, 8, 16],
+        'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192],
+        'multiplier': [1, 2, 4],
+        'pos_encoding': [None, 'basic', 'rff']},
 }
 
 
@@ -254,6 +252,18 @@ if __name__=='__main__':
             with open(search_space_path, 'r') as f:
                 search_space = json.load(f)
         else:
+            # search space initializing
+            specific_search_space = {'num2d': search_space_2d['num'], 'num1d': search_space_1d['num']}
+            del search_space_1d['num'], search_space_2d['num']
+            for i in range(specific_search_space['num2d'][-1] + specific_search_space['num1d'][-1]):
+                specific_search_space[f'BLOCK{i}'] = {
+                    'search_space_2d': search_space_2d,
+                    'search_space_1d': search_space_1d,
+                }
+
+            specific_search_space['SED'] = search_space_1d
+            specific_search_space['DOA'] = search_space_1d
+            search_space = specific_search_space
             with open(search_space_path, 'w') as f:
                 json.dump(search_space, f, indent=4)
 
@@ -277,8 +287,10 @@ if __name__=='__main__':
             with open(current_result_path, 'w') as f:
                 json.dump(results, f, indent=4)
         
-        # search space 줄이기
+        # 분석
         analyzer(search_space, results, train_config)
+        
+        # search space 줄이기
         break
         # search space 기록 남기기
 

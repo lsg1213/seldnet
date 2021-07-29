@@ -7,31 +7,47 @@ from search_utils import search_space_sanity_check
 from random import choice
 
 
-def get_sampled_config(search_space, model_config, name='BLOCK'):
-    keys = [i for i in search_space.keys() if i != 'num']
-    number = choice(search_space['num'])
-    if name != 'BLOCK':
-        while number == 0:
-            number = choice(search_space['num'])
+def get_classifier_config(search_space, model_config, stage_name):
+    sp = search_space[stage_name]
+    model_config[stage_name] = choice([i for i in sp.keys()])
+
+    model_arg_config = {}
+    for k, v in sp[model_config[stage_name]].items():
+        v = choice(v)
+        model_arg_config[k] = v
+
+    model_config[stage_name + '_ARGS'] = model_arg_config
 
 
-    for i in range(number):
-        search_space = copy.deepcopy(search_space)
-        config_name = name + str(len([i for i in model_config.keys() if name in i]) // 2) if name == 'BLOCK' else name
-        block = choice(keys)
-        model_config[config_name] = block
+def get_block_config(search_space, model_config, stage_name='BLOCK'):
+    num2d = choice(search_space['num2d'])
+    num1d = choice(search_space['num1d'])
 
-        model_arg_config = {}
-        for k, v in search_space[block].items():
-            if block == 'mother_stage':
-                if k == 'filters1':
-                    v = [i for i in v if i > 0]
-            v = choice(v)
-            if k == 'filters2' and v == 0:
-                import pdb; pdb.set_trace()
-            model_arg_config[k] = v
+    for i in range(num2d + num1d):
+        name = stage_name + str(i)
+        sp = search_space[name]
+        if num2d != 0:
+            model_config[name] = choice([i for i in sp['search_space_2d'].keys()])
+
+            model_arg_config = {}
+            for k, v in sp['search_space_2d'][model_config[name]].items():
+                if model_config[name] == 'mother_stage':
+                    if k == 'filters1':
+                        v = [i for i in v if i > 0]
+                v = choice(v)
+                model_arg_config[k] = v
+            num2d -= 1
+        else:
+            model_config[name] = choice([i for i in sp['search_space_1d'].keys()])
+
+            model_arg_config = {}
+            for k, v in sp['search_space_1d'][model_config[name]].items():
+                v = choice(v)
+                model_arg_config[k] = v
+            num1d -= 1
+
         
-        model_config[config_name + '_ARGS'] = model_arg_config
+        model_config[name + '_ARGS'] = model_arg_config
 
 
 def get_config(train_config, search_space, input_shape, postprocess_fn=None):
@@ -43,11 +59,10 @@ def get_config(train_config, search_space, input_shape, postprocess_fn=None):
         'n_classes': train_config.n_classes
     }
 
-    get_sampled_config(search_space['search_space_2d'], model_config)
-    get_sampled_config(search_space['search_space_1d'], model_config)
+    get_block_config(search_space, model_config)
 
-    get_sampled_config(search_space['search_space_1d'], model_config, name='SED')
-    get_sampled_config(search_space['search_space_1d'], model_config, name='DOA')
+    get_classifier_config(search_space, model_config, stage_name='SED')
+    get_classifier_config(search_space, model_config, stage_name='DOA')
 
     if postprocess_fn:
         model_config = postprocess_fn(model_config)

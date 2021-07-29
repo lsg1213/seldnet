@@ -131,7 +131,7 @@ def analyzer(search_space, results, train_config):
             criteria = s0
             frontier[0].append(s0)
 
-
+    result_table = {}
     for rv in table.keys():
         if rv == keyword:
             continue
@@ -147,7 +147,7 @@ def analyzer(search_space, results, train_config):
             unique_values, perfs, min_samples=train_config.min_samples, 
             a=0.05, verbose=train_config.verbose)
         n_samples = [len(p) for p in perfs]
-        
+        import pdb; pdb.set_trace()
         for i, pv in enumerate(pvalues):
             if len(pv) > 0:
                 print(f'{unique_values[i]}: '
