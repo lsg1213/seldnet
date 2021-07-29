@@ -37,4 +37,10 @@ def postprocess_fn(model_config):
             #     args['strides'] = [1, 1]
             if args['filters2'] == 0:
                 args['kernel_size2'] = 0
+
+                if args['connect2'][2] == 0:
+                    args['filters1'] = 0
+
+                    if args['connect2'][1] == 0:
+                        args['filters0'] = 0
     return model_config

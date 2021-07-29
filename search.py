@@ -12,6 +12,7 @@ from config_sampler import get_config
 from search_utils import postprocess_fn
 from model_flop import get_flops
 from model_size import get_model_size
+from model_analyze import analyzer
 import models
 
 
@@ -22,9 +23,8 @@ args.add_argument('--name', type=str, required=True,
 args.add_argument('--dataset_path', type=str, 
                   default='/root/datasets/DCASE2021/feat_label')
 args.add_argument('--n_samples', type=int, default=250)
-args.add_argument('--n_blocks', type=int, default=3)
-# args.add_argument('--min_flops', type=int, default=200_000_000)
-# args.add_argument('--max_flops', type=int, default=240_000_000)
+args.add_argument('--min_samples', type=int, default=32)
+args.add_argument('--verbose', action='store_true')
 
 args.add_argument('--batch_size', type=int, default=256)
 args.add_argument('--n_repeat', type=int, default=5)
@@ -224,6 +224,8 @@ if __name__=='__main__':
     train_config_path = os.path.join(result_path, 'train_config.json')
     if train_config.new:
         os.system(f'rm -rf {os.path.join(result_path, "*")}')
+    del train_config.new
+
     if not os.path.exists(train_config_path):
         with open(train_config_path, 'w') as f:
             json.dump(vars(train_config), f, indent=4)
@@ -231,6 +233,8 @@ if __name__=='__main__':
         with open(train_config_path, 'r') as f:
             loaded_train_config = json.load(f)
         if loaded_train_config != vars(train_config):
+            for k, v in vars(train_config).items():
+                print(k, ':', v)
             raise ValueError('train config doesn\'t match')
 
     index = 0
@@ -269,12 +273,13 @@ if __name__=='__main__':
             outputs['objective_score'] = get_objective_score(outputs)
 
             # 결과 저장
-            results.append(outputs)
+            results.append({'config': model_configs, 'perf': outputs})
             with open(current_result_path, 'w') as f:
                 json.dump(results, f, indent=4)
-        break
+        
         # search space 줄이기
-
+        analyzer(search_space, results, train_config)
+        break
         # search space 기록 남기기
 
         # search space 저장

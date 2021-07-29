@@ -14,7 +14,9 @@ def get_sampled_config(search_space, model_config, name='BLOCK'):
         while number == 0:
             number = choice(search_space['num'])
 
+
     for i in range(number):
+        search_space = copy.deepcopy(search_space)
         config_name = name + str(len([i for i in model_config.keys() if name in i]) // 2) if name == 'BLOCK' else name
         block = choice(keys)
         model_config[config_name] = block
@@ -24,8 +26,9 @@ def get_sampled_config(search_space, model_config, name='BLOCK'):
             if block == 'mother_stage':
                 if k == 'filters1':
                     v = [i for i in v if i > 0]
-                    
             v = choice(v)
+            if k == 'filters2' and v == 0:
+                import pdb; pdb.set_trace()
             model_arg_config[k] = v
         
         model_config[config_name + '_ARGS'] = model_arg_config

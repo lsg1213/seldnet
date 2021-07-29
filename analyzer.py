@@ -162,130 +162,6 @@ if __name__ == '__main__':
         pairs = filter_fn(
             pairs,
             lambda x: x['config']['BLOCK0'] != 'identity_stage')
-
-    # 1차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['DOA'] == 'bidirectional_GRU_stage')
-
-    # 2차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK0'] == 'mother_stage')
-
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['SED'] != 'bidirectional_GRU_stage')
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK2'] != 'bidirectional_GRU_stage')
-
-    # pairs = filter_fn(
-    #     pairs,
-    #     lambda x: x['config'].get('BLOCK3', None) != 'bidirectional_GRU_stage' if not x['config'].get('BLOCK3', None) else True)
-
-    # 3차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config'].get('BLOCK3', None) == None)
-
-    backbone_stage_number = len(pairs[0]['config'].keys()) // 2 - 2
-    for i in range(backbone_stage_number):
-        pairs = filter_fn(
-            pairs,
-            lambda x: x['config'][f'BLOCK{i}'] != 'simple_dense_stage')
-
-    # 4차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK0'] == 'mother_stage')
-
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK1'] == 'bidirectional_GRU_stage')
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK0_ARGS']['depth'] != 3)
-
-    # 5차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK2'] == 'transformer_encoder_stage')
-        
-    # pairs = filter_fn(
-    #     pairs,
-    #     lambda x: x['config']['DOA_ARGS']['depth'] != 2)
-
-    # 6차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['SED'] == 'conformer_encoder_stage')
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: not x['config']['BLOCK1_ARGS']['units'] in [16])
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK1_ARGS']['depth'] == 1)
-        
-    # 7차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK2_ARGS']['depth'] == 1)
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK2_ARGS']['kernel_size'] in [1,3])
-
-    # 8차
-    # pairs = filter_fn(
-    #     pairs,
-    #     lambda x: x['config']['BLOCK0_ARGS']['strides'] in [[1,2], [1,3]])
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: not x['config']['BLOCK1_ARGS']['units'] in [8, 24])
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK0_ARGS']['depth'] == 1)
-
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['SED_ARGS']['depth'] != 3)
-
-    # 9차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['DOA_ARGS']['units'] >= 16)
-
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['DOA_ARGS']['depth'] == 3)
-        
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK0_ARGS']['strides'] == [1,2])
-
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK0_ARGS']['kernel_size2'] == 0)
-
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['BLOCK0_ARGS']['connect2'] != [0,0,1])
-
-    # 10차
-    pairs = filter_fn(
-        pairs,
-        lambda x: x['config']['SED_ARGS']['multiplier'] != 1)
-
-
-
-
     
     for pair in pairs:
         # 1.2 add f1score
@@ -365,7 +241,6 @@ if __name__ == '__main__':
             table[f'{stage}_exist'] = [
                 count_blocks(p['config'], lambda p: p == stage) > 0
                 for p in pairs]
-
     # 3. value
     table = {k: np.array(v) for k, v in table.items()}
 
@@ -375,10 +250,12 @@ if __name__ == '__main__':
     frontier = [[], []]
     criteria = -np.inf
     for s0, s1 in scores:
+        import pdb; pdb.set_trace()
         if s1 > criteria:
             criteria = s1
             frontier[0].append(s0)
             frontier[1].append(s1)
+    import pdb; pdb.set_trace()
 
     # 3.2 find significant variables
     for rv in table.keys():
