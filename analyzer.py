@@ -195,7 +195,7 @@ if __name__ == '__main__':
     table = {feat: [] for feat in feats}
     table[keyword] = []
     table[keyword2] = []
-
+    import pdb; pdb.set_trace()
     for pair in pairs:
         for feat in feats.keys():
             # find value

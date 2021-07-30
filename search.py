@@ -288,10 +288,12 @@ if __name__=='__main__':
                 json.dump(results, f, indent=4)
         
         # 분석
-        analyzer(search_space, results, train_config)
-        
-        # search space 줄이기
-        break
+        check = True
+        while check:
+            table = analyzer(search_space, results, train_config)
+            
+            # search space 줄이기
+            # check, search_space = narrow_search_space(search_space, table)
         # search space 기록 남기기
 
         # search space 저장

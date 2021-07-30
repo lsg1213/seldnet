@@ -71,7 +71,10 @@ def extract_feats_from_pairs(pairs):
                 for name in feats[key][0]:
                     new_name = f'{key}.{name}'
                     for pair in pairs:
-                        value = pair['config'][key][name]
+                        value = pair['config'].get(key, None)
+                        if value == None:
+                            continue
+                        value = value[name]
                         if isinstance(value, list):
                             value = str(value)
                         value = set([value])
@@ -98,9 +101,14 @@ def analyzer(search_space, results, train_config):
             # find value
             if '.' in feat:
                 front, end = feat.split('.')
-                value = result['config'][front][end]
+                value = result['config'].get(front, {})
+                value = value.get(end, None)
+                if value == None:
+                    continue
             else:
-                value = result['config'][feat]
+                value = result['config'].get(feat, None)
+                if value == None:
+                    continue
             if not isinstance(value, (int, float, str)):
                 value = str(value)
 
@@ -131,7 +139,7 @@ def analyzer(search_space, results, train_config):
             criteria = s0
             frontier[0].append(s0)
 
-    result_table = {}
+    result_table = []
     for rv in table.keys():
         if rv == keyword:
             continue
@@ -140,22 +148,16 @@ def analyzer(search_space, results, train_config):
         if len(unique_values) == 1:
             continue
 
-        print(f'{rv}')
         perfs = [table[keyword][table[rv] == value]
                     for value in unique_values]
         pvalues = get_ks_test_values(
             unique_values, perfs, min_samples=train_config.min_samples, 
             a=0.05, verbose=train_config.verbose)
         n_samples = [len(p) for p in perfs]
-        import pdb; pdb.set_trace()
-        for i, pv in enumerate(pvalues):
-            if len(pv) > 0:
-                print(f'{unique_values[i]}: '
-                        f'[{min(pv):.5f}, {max(pv):.5f}] '
-                        f'({np.mean(pv):.5f}) '
-                        f'n_samples={len(perfs[i])}, '
-                        f'{keyword}(min={np.min(perfs[i]):.5f}, '
-                        f'mean={np.mean(perfs[i]):.5f}, '
-                        f'median={np.median(perfs[i]):.5f}, '
-                        f'max={np.max(perfs[i]):.5f})')
-        print()
+        for i in range(len(pvalues)):
+            result_table.append([
+                [pvalues[i][0], np.min(perfs[i]), np.mean(perfs[i]), np.median(perfs[i]), np.max(perfs[i])], # [pvalue, min, mean, median, max]
+                rv,
+                unique_values[i]
+            ])
+    return result_table
