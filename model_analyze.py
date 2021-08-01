@@ -12,6 +12,53 @@ stages_1d = ['bidirectional_GRU_stage',
              'conformer_encoder_stage']
 
 
+def update_search_space(search_space, name, unit, mode='del'):
+    name = name.split('.')
+    if len(name) == 1:
+        del search_space[name[0]][unit]
+    elif len(name) == 2:
+        del search_space[name[0]][name[1]][unit]
+    else:
+        raise ValueError(f'something wrong to name, {name}')
+
+    # 제거되는 것들을 모두 기록할 json 만들기
+    Unimplementation()
+
+
+def narrow_search_space(search_space, table):
+    '''
+        table: [pvalue, min, mean, median, max], name, unit
+    '''
+    threshold = 1
+    
+    if len(table) == 0:
+        return False, search_space
+
+    table = sorted(table, key=lambda x: x[0][0]) # pvalue
+    best = table[0]
+    
+    comparison = []
+    for result in table:
+        if best[-2] == result[-2] and best[-1] != result[-1]:
+            comparison.append(result)
+    
+    import pdb; pdb.set_trace()
+    low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단
+    for case in comparison:
+        if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
+            high += 1
+        elif case[0][1] > best[0][1] and case[0][3] > best[0][3]:
+            low += 1
+
+    if low == high == 0: # 결정할만한 게 없는 경우
+        return False, search_space
+
+    # best보다 낮은 것이 있으면 best까지 제거 best보다 높은 것이 있으면 그것들 모두 제거
+    Unimplementation()
+            
+    return True, search_space
+
+
 def is_1d(block):
     return block in stages_1d
 
@@ -89,7 +136,15 @@ def extract_feats_from_pairs(pairs):
 def analyzer(search_space, results, train_config):
     min_samples = train_config.min_samples
     keyword = 'objective_score'
-    common_features = extract_feats_from_pairs(results)
+    interests = ['SED', 'DOA'] + [f'BLOCK{i}' for i in range(search_space['num1d'][-1] + search_space['num2d'][-1])]
+
+    common_features = {}
+    for k,v in extract_feats_from_pairs(results).items():
+        for interest in interests:
+            if interest in k:
+                common_features[k] = v
+                break
+    # common_features = extract_feats_from_pairs(results)
 
     table = {feat: [] for feat in common_features}
     table[keyword] = []
@@ -119,7 +174,7 @@ def analyzer(search_space, results, train_config):
             score = score[-1]
         table[keyword].append(score)
 
-    table['count1d'] = [count_blocks(p['config']) for p in results]
+    # table['count1d'] = [count_blocks(p['config']) for p in results]
     
     total = [v for k, v in common_features.items() 
                 if k.startswith('BLOCK') or k in ['SED', 'DOA']]
@@ -152,7 +207,7 @@ def analyzer(search_space, results, train_config):
                     for value in unique_values]
         pvalues = get_ks_test_values(
             unique_values, perfs, min_samples=train_config.min_samples, 
-            a=0.05, verbose=train_config.verbose)
+            a=train_config.threshold, verbose=train_config.verbose)
         n_samples = [len(p) for p in perfs]
         for i in range(len(pvalues)):
             result_table.append([

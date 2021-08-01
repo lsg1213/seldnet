@@ -12,7 +12,7 @@ from config_sampler import get_config
 from search_utils import postprocess_fn
 from model_flop import get_flops
 from model_size import get_model_size
-from model_analyze import analyzer
+from model_analyze import analyzer, narrow_search_space
 import models
 
 
@@ -25,6 +25,7 @@ args.add_argument('--dataset_path', type=str,
 args.add_argument('--n_samples', type=int, default=250)
 args.add_argument('--min_samples', type=int, default=32)
 args.add_argument('--verbose', action='store_true')
+args.add_argument('--threshold', type=float, default=0.05)
 
 args.add_argument('--batch_size', type=int, default=256)
 args.add_argument('--n_repeat', type=int, default=5)
@@ -42,9 +43,9 @@ search_space_2d = {
     'num': [0, 1],
     'mother_stage':
         {'depth': [1, 2, 3],
-        'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
-        'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
-        'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+        'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
+        'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
+        'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
         'kernel_size0': [1, 3, 5],
         'kernel_size1': [1, 3, 5],
         'kernel_size2': [1, 3, 5],
@@ -74,7 +75,7 @@ search_space_1d = {
         {'depth': [1, 2],
         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
         'n_head': [1, 2, 4, 8, 16],
-        'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192],
+        'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
         'multiplier': [1, 2, 4],
         'pos_encoding': [None, 'basic', 'rff']},
 }
@@ -185,7 +186,7 @@ def get_dataset(config, mode: str = 'train'):
     return dataset
 
 
-if __name__=='__main__':
+def main():
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
     del train_config.gpus
@@ -254,7 +255,6 @@ if __name__=='__main__':
         else:
             # search space initializing
             specific_search_space = {'num2d': search_space_2d['num'], 'num1d': search_space_1d['num']}
-            del search_space_1d['num'], search_space_2d['num']
             for i in range(specific_search_space['num2d'][-1] + specific_search_space['num1d'][-1]):
                 specific_search_space[f'BLOCK{i}'] = {
                     'search_space_2d': search_space_2d,
@@ -287,16 +287,22 @@ if __name__=='__main__':
             with open(current_result_path, 'w') as f:
                 json.dump(results, f, indent=4)
         
+        
         # 분석
         check = True
         while check:
             table = analyzer(search_space, results, train_config)
-            
+            train_config.threshold = 1
+            tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold, table))
+            if len(tmp_table) == 0:
+                print('MODEL SEARCH COMPLETE!!')
+                return
             # search space 줄이기
-            # check, search_space = narrow_search_space(search_space, table)
+            check, search_space = narrow_search_space(search_space, tmp_table)
         # search space 기록 남기기
 
         # search space 저장
 
 
-
+if __name__=='__main__':
+    main()

@@ -20,14 +20,16 @@ def get_classifier_config(search_space, model_config, stage_name):
 
 
 def get_block_config(search_space, model_config, stage_name='BLOCK'):
+
     num2d = choice(search_space['num2d'])
     num1d = choice(search_space['num1d'])
-
+    
     for i in range(num2d + num1d):
         name = stage_name + str(i)
         sp = search_space[name]
+        
         if num2d != 0:
-            model_config[name] = choice([i for i in sp['search_space_2d'].keys()])
+            model_config[name] = choice([i for i in sp['search_space_2d'].keys() if i != 'num'])
 
             model_arg_config = {}
             for k, v in sp['search_space_2d'][model_config[name]].items():
@@ -38,7 +40,7 @@ def get_block_config(search_space, model_config, stage_name='BLOCK'):
                 model_arg_config[k] = v
             num2d -= 1
         else:
-            model_config[name] = choice([i for i in sp['search_space_1d'].keys()])
+            model_config[name] = choice([i for i in sp['search_space_1d'].keys() if i != 'num'])
 
             model_arg_config = {}
             for k, v in sp['search_space_1d'][model_config[name]].items():
