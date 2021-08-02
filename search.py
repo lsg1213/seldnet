@@ -13,6 +13,7 @@ from search_utils import postprocess_fn
 from model_flop import get_flops
 from model_size import get_model_size
 from model_analyze import analyzer, narrow_search_space
+from writer_manager import Writer
 import models
 
 
@@ -189,17 +190,21 @@ def get_dataset(config, mode: str = 'train'):
 def main():
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
+    if train_config.gpus != '-1':
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        print(gpus)
+        if gpus:
+            try:
+                tf.config.experimental.set_virtual_device_configuration(
+                    gpus[0],
+                    [tf.config.experimental.VirtualDeviceConfiguration(
+                        memory_limit=10240)])
+            except RuntimeError as e:
+                print(e)
     del train_config.gpus
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    print(gpus)
-    if gpus:
-        try:
-            tf.config.experimental.set_virtual_device_configuration(
-                gpus[0],
-                [tf.config.experimental.VirtualDeviceConfiguration(
-                    memory_limit=10240)])
-        except RuntimeError as e:
-            print(e)
+
+    writer = Writer(train_config)
+    del train_config.new
 
     name = train_config.name
     if name.endswith('.json'):
@@ -214,44 +219,30 @@ def main():
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
 
-    # result folder
-    result_path = os.path.join('result', name)
-    if not os.path.exists(result_path):
-        os.makedirs(result_path)
-    
-    # train config
-    train_config_path = os.path.join(result_path, 'train_config.json')
-    if train_config.new:
-        os.system(f'rm -rf {os.path.join(result_path, "*")}')
-    del train_config.new
-
-    if not os.path.exists(train_config_path):
-        with open(train_config_path, 'w') as f:
-            json.dump(vars(train_config), f, indent=4)
+    if not os.path.exists(writer.train_config_path):
+        writer.train_config_dump()
     else:
-        with open(train_config_path, 'r') as f:
-            loaded_train_config = json.load(f)
+        loaded_train_config = writer.train_config_load()
         if loaded_train_config != vars(train_config):
             for k, v in vars(train_config).items():
                 print(k, ':', v)
             raise ValueError('train config doesn\'t match')
 
-    index = 0
+    
     while True:
-        index += 1 # 차수
-        current_result_path = os.path.join(result_path, f'result_{index}.json')
+        writer.index += 1 # 차수
+
+        current_result_path = os.path.join(writer.result_path, f'result_{writer.index}.json')
         results = []
 
         # resume
         if os.path.exists(current_result_path):
-            with open(current_result_path, 'r') as f:
-                results = json.load(f)
+            results = writer.load(current_result_path)
 
         # search space
-        search_space_path = os.path.join(result_path, f'search_space_{index}.json')
+        search_space_path = os.path.join(writer.result_path, f'search_space_{writer.index}.json')
         if os.path.exists(search_space_path):
-            with open(search_space_path, 'r') as f:
-                search_space = json.load(f)
+            search_space = writer.load(search_space_path)
         else:
             # search space initializing
             specific_search_space = {'num2d': search_space_2d['num'], 'num1d': search_space_1d['num']}
@@ -264,8 +255,7 @@ def main():
             specific_search_space['SED'] = search_space_1d
             specific_search_space['DOA'] = search_space_1d
             search_space = specific_search_space
-            with open(search_space_path, 'w') as f:
-                json.dump(search_space, f, indent=4)
+            wrtier.dump(search_space, f)
 
         current_number = len(results)
         for number in range(current_number, train_config.n_samples):
@@ -284,8 +274,7 @@ def main():
 
             # 결과 저장
             results.append({'config': model_configs, 'perf': outputs})
-            with open(current_result_path, 'w') as f:
-                json.dump(results, f, indent=4)
+            writer.dump(current_result_path, results)
         
         
         # 분석
@@ -298,10 +287,10 @@ def main():
                 print('MODEL SEARCH COMPLETE!!')
                 return
             # search space 줄이기
-            check, search_space = narrow_search_space(search_space, tmp_table)
-        # search space 기록 남기기
+            check, search_space, results = narrow_search_space(search_space, tmp_table, results, writer)
 
         # search space 저장
+        writer.dump(search_space, search_space_path)
 
 
 if __name__=='__main__':

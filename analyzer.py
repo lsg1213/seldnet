@@ -195,7 +195,6 @@ if __name__ == '__main__':
     table = {feat: [] for feat in feats}
     table[keyword] = []
     table[keyword2] = []
-    import pdb; pdb.set_trace()
     for pair in pairs:
         for feat in feats.keys():
             # find value
@@ -250,12 +249,10 @@ if __name__ == '__main__':
     frontier = [[], []]
     criteria = -np.inf
     for s0, s1 in scores:
-        import pdb; pdb.set_trace()
         if s1 > criteria:
             criteria = s1
             frontier[0].append(s0)
             frontier[1].append(s1)
-    import pdb; pdb.set_trace()
 
     # 3.2 find significant variables
     for rv in table.keys():

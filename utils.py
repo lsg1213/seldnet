@@ -4,11 +4,23 @@ import numpy as np
 import csv
 import os
 import pandas as pd
+import json
 
 
 class Unimplementation(Exception):
     def __init__(self, msg='unimplementation error'):
         self.msg = msg
+
+    def __str__(self):
+        return self.msg
+
+
+class ValueErrorjson(ValueError):
+    def __init__(self, msg='unimplementation error', writer=None, *args):
+        super(ValueErrorjson, self).__init__()
+        self.msg = msg
+        if writer != None:
+            writer.dump([*args], f'error_{writer.index}.json')
 
     def __str__(self):
         return self.msg

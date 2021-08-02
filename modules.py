@@ -4,6 +4,15 @@ from tensorflow.keras.layers import *
 from layers import *
 from utils import safe_tuple
 
+
+stages_1d = ['bidirectional_GRU_stage',
+             'transformer_encoder_stage',
+             'simple_dense_stage',
+             'conformer_encoder_stage']
+
+stages_2d = ['mother_stage']
+
+
 """
 Modules
 

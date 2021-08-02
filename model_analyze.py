@@ -1,35 +1,97 @@
+import json
+
 import numpy as np
 from scipy.stats import ks_2samp
 from itertools import combinations
 
 from analyzer import extract_feats_from_pairs
-from utils import Unimplementation
+from utils import Unimplementation, ValueErrorjson
+from writer_manager import Writer
+from modules import stages_1d, stages_2d
 
 
-stages_1d = ['bidirectional_GRU_stage',
-             'transformer_encoder_stage',
-             'simple_dense_stage',
-             'conformer_encoder_stage']
+def delete_unit(search_space, name, unit, writer):
+    check = False
+
+    if isinstance(unit, str):
+        unit = json.loads(unit)
+
+    for dimension in search_space[name[0]].keys():
+        for layer in search_space[name[0]][dimension].keys():
+            if layer != 'num':
+                if name[1] in search_space[name[0]][dimension][layer]:
+                    check = True
+                    try:
+                        if unit == [1,3]:
+                            import pdb; pdb.set_trace() # 버그 잡기 =
+                        search_space[name[0]][dimension][layer][name[1]].remove(unit)
+                    except:
+                        import pdb; pdb.set_trace() #버그 잡기 => post processing을 통해서 kernel_size가 0이되는 케이스를 어떻게 처리할지 고민
+
+    if check:
+        return search_space
+    raise ValueErrorjson(search_space, name, unit, msg='nothing was deleted!!', writer=writer)
 
 
-def update_search_space(search_space, name, unit, mode='del'):
+def delete_stage(search_space, name, unit, writer):
+    check = False
+    
+    for dimension in search_space[name[0]].keys():
+        try:
+            for layer in search_space[name[0]][dimension].keys():
+                if unit == layer:
+                    check = True
+                    del search_space[name[0]][dimension][unit]
+                    break
+        except:
+            import pdb; pdb.set_trace()
+
+    if check:
+        return search_space
+    raise ValueErrorjson('nothing was deleted!!', writer, search_space, name, unit)
+
+
+def update_search_space(search_space, name, unit, writer):
+    name = name.replace('_ARGS', '') if '_ARGS' in name else name
     name = name.split('.')
+
     if len(name) == 1:
-        del search_space[name[0]][unit]
+        search_space = delete_stage(search_space, name, unit, writer)
     elif len(name) == 2:
-        del search_space[name[0]][name[1]][unit]
+        search_space = delete_unit(search_space, name, unit, writer)
     else:
         raise ValueError(f'something wrong to name, {name}')
 
-    # 제거되는 것들을 모두 기록할 json 만들기
-    Unimplementation()
+
+def stage_filter(name, unit):
+    def _stage_filter(result):
+        return result['config'][name[0]] != unit
+    return _stage_filter
+    
+
+def unit_filter(name, unit):
+    def _stage_filter(result):
+        return result['config'][name[0]][name[1]] != unit
+    return _stage_filter
 
 
-def narrow_search_space(search_space, table):
+def result_filtering(results, name, unit):
+    name = name.split('.')
+    if len(name) == 1:
+        # stage filtering
+        results = list(filter(stage_filter(name, unit), results))
+    elif len(name) == 2:
+        # unit filtering
+        results = list(filter(unit_filter(name, unit), results))
+    return results
+
+
+def narrow_search_space(search_space, table, results, writer):
     '''
         table: [pvalue, min, mean, median, max], name, unit
     '''
     threshold = 1
+    check = False
     
     if len(table) == 0:
         return False, search_space
@@ -42,21 +104,32 @@ def narrow_search_space(search_space, table):
         if best[-2] == result[-2] and best[-1] != result[-1]:
             comparison.append(result)
     
-    import pdb; pdb.set_trace()
-    low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단
+    low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
+    removed_case = []
     for case in comparison:
         if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
-            high += 1
+            removed_case.append({
+                'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
+                'min': f'{best[0][1]} vs {case[0][1]}',
+                'median': f'{best[0][3]} vs {case[0][3]}',
+                'result': f'{best[-1]} was deleted'
+            })
+            update_search_space(search_space, best[-2], best[-1], writer)
+            results = result_filtering(results, best[-2], best[-1])
+            check = True
         elif case[0][1] > best[0][1] and case[0][3] > best[0][3]:
-            low += 1
-
-    if low == high == 0: # 결정할만한 게 없는 경우
-        return False, search_space
-
-    # best보다 낮은 것이 있으면 best까지 제거 best보다 높은 것이 있으면 그것들 모두 제거
-    Unimplementation()
-            
-    return True, search_space
+            removed_case.append({
+                'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
+                'min': f'{best[0][1]} vs {case[0][1]}',
+                'median': f'{best[0][3]} vs {case[0][3]}',
+                'result': f'{case[-1]} was deleted'
+            })
+            update_search_space(search_space, case[-2], case[-1], writer)
+            results = result_filtering(results, case[-2], case[-1])
+            check = True
+    writer.dump(removed_case, f'removed_space_{writer.index}.json')
+    
+    return check, search_space, results
 
 
 def is_1d(block):
