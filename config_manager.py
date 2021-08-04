@@ -59,17 +59,17 @@ def manage_gpu(config):
         os.environ['CUDA_VISIBLE_DEVICES'] = config['gpus']
 
         # divide gpu ram
-        import tensorflow as tf
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        print(gpus)
-        if gpus:
-            try:
-                tf.config.experimental.set_virtual_device_configuration(
-                    gpus[0],
-                    [tf.config.experimental.VirtualDeviceConfiguration(
-                        memory_limit=10240)])
-            except RuntimeError as e:
-                print(e)
+        # import tensorflow as tf
+        # gpus = tf.config.experimental.list_physical_devices('GPU')
+        # print(gpus)
+        # if gpus:
+        #     try:
+        #         tf.config.experimental.set_virtual_device_configuration(
+        #             gpus[0],
+        #             [tf.config.experimental.VirtualDeviceConfiguration(
+        #                 memory_limit=10240)])
+        #     except RuntimeError as e:
+        #         print(e)
         del config['gpus']
     except:
         pass

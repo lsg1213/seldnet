@@ -23,8 +23,8 @@ args.add_argument('--name', type=str, required=True,
                   help='name must be {name}_{divided index} ex) 2021_1')
 args.add_argument('--dataset_path', type=str, 
                   default='/root/datasets/DCASE2021/feat_label')
-args.add_argument('--n_samples', type=int, default=250)
-args.add_argument('--min_samples', type=int, default=32)
+args.add_argument('--n_samples', type=int, default=4)
+args.add_argument('--min_samples', type=int, default=0)
 args.add_argument('--verbose', action='store_true')
 args.add_argument('--threshold', type=float, default=0.05)
 
@@ -41,12 +41,12 @@ input_shape = [300, 64, 7]
 
 '''            SEARCH SPACES           '''
 search_space_2d = {
-    'num': [0, 1],
+    'num': [1, 2],
     'mother_stage':
         {'depth': [1, 2, 3],
-        'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
-        'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
-        'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
+        'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
+        'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
+        'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
         'kernel_size0': [1, 3, 5],
         'kernel_size1': [1, 3, 5],
         'kernel_size2': [1, 3, 5],
@@ -57,12 +57,12 @@ search_space_2d = {
         'strides': [(1, 1), (1, 2), (1, 3)]},
 }
 search_space_1d = {
-    'num': [0, 1],
+    'num': [0, 1, 2],
     'bidirectional_GRU_stage':
-        {'depth': [1, 2, 3],
+        {'depth': [1, 2],
         'units': [16, 24, 32, 48, 64, 96, 128]}, 
     'transformer_encoder_stage':
-        {'depth': [1, 2, 3],
+        {'depth': [1, 2],
         'n_head': [1, 2, 4, 8, 16],
         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
         'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
@@ -255,7 +255,7 @@ def main():
             specific_search_space['SED'] = search_space_1d
             specific_search_space['DOA'] = search_space_1d
             search_space = specific_search_space
-            wrtier.dump(search_space, f)
+            writer.dump(search_space, search_space_path)
 
         current_number = len(results)
         for number in range(current_number, train_config.n_samples):

@@ -21,9 +21,8 @@ def postprocess_fn(model_config):
         if stage_type == 'mother_stage':
             args = model_config[f'{block}_ARGS']
             if args['filters2'] == 0:
-                if args['filters1'] != 0:
-                    args['connect2'][2] = 1
-                elif args['filters0'] != 0:
+                args['connect2'][2] = 1
+                if args['filters0'] != 0:
                     args['connect2'][1] = 1
 
             if args['filters0'] == 0:
@@ -31,10 +30,7 @@ def postprocess_fn(model_config):
                 args['kernel_size0'] = 0
                 args['connect1'][1] = 0
                 args['connect2'][1] = 0
-            # if args['filters1'] == 0:
-            #     args['kernel_size1'] = 0
-            #     args['connect2'][2] = 0
-            #     args['strides'] = [1, 1]
+                
             if args['filters2'] == 0:
                 args['kernel_size2'] = 0
 

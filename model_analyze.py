@@ -21,12 +21,8 @@ def delete_unit(search_space, name, unit, writer):
             if layer != 'num':
                 if name[1] in search_space[name[0]][dimension][layer]:
                     check = True
-                    try:
-                        if unit == [1,3]:
-                            import pdb; pdb.set_trace() # 버그 잡기 =
+                    if not (layer == 'mother_stage' and 'kernel_size' in name[1] and unit == 0):
                         search_space[name[0]][dimension][layer][name[1]].remove(unit)
-                    except:
-                        import pdb; pdb.set_trace() #버그 잡기 => post processing을 통해서 kernel_size가 0이되는 케이스를 어떻게 처리할지 고민
 
     if check:
         return search_space

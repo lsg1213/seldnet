@@ -12,7 +12,7 @@ class Writer:
         self.train_config_path = os.path.join(self.result_path, 'train_config.json')
         self.index = self.get_index()
         if self.train_config.new:
-            os.system(f'rm -rf {os.path.join(writer.result_path, "*")}')
+            os.system(f'rm -rf {os.path.join(self.result_path, "*")}')
 
     def train_config_dump(self):
         self.dump(self.train_config, self.train_config_path)

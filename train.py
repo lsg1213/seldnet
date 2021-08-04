@@ -1,8 +1,12 @@
+import numpy as np
 import os
 import tensorflow as tf
+import time
+from collections import OrderedDict
+from glob import glob
+from numpy import inf
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
-from collections import OrderedDict
 
 import layers
 import losses
@@ -10,144 +14,129 @@ import models
 from data_loader import *
 from metrics import * 
 from params import get_param
+from swa import SWA
 from transforms import *
-from utils import adaptive_clip_grad
-from utils import get_device
-from utils import write_answer
-from utils import load_output_format_file
-from utils import segment_labels
-from utils import convert_output_format_cartesian_to_polar
-from SELD_evaluation_metrics import SELDMetrics_
+from utils import adaptive_clip_grad, AdaBelief, apply_kernel_regularizer
 
-@tf.function
-def trainstep(model, x, y, sed_loss, doa_loss, loss_weight, optimizer, agc):
-    with tf.GradientTape() as tape:
-        y_p = model(x, training=True)
+from search import search_space_1d, search_space_2d
+
+
+
+
+def generate_trainstep(sed_loss, doa_loss, loss_weights, config, label_smoothing=0):
+    # These are statistics from the train dataset
+    train_samples = tf.convert_to_tensor(
+        [[58193, 32794, 29801, 21478, 14822, 
+        9174, 66527,  6740,  9342,  6498, 
+        22218, 49758]],
+        dtype=tf.float32)
+    cls_weights = tf.reduce_mean(train_samples) / train_samples
+    @tf.function
+    def trainstep(model, x, y, optimizer):
+        with tf.GradientTape() as tape:
+            y_p = model(x, training=True)
+            sed, doa = y
+            sed_pred, doa_pred = y_p
+
+            if label_smoothing > 0:
+                sed = sed * (1-label_smoothing) + 0.5 * label_smoothing
+
+            # sloss = tf.reduce_mean(sed_loss(sed, sed_pred) * cls_weights)
+            # dloss = doa_loss(doa, doa_pred, cls_weights)
+            sloss = tf.reduce_mean(sed_loss(sed, sed_pred))
+            dloss = doa_loss(doa, doa_pred)
+
+            
+            loss = sloss * loss_weights[0] + dloss * loss_weights[1]
+
+            # regularizer
+            # loss += tf.add_n([l.losses[0] for l in model.layers
+            #                   if len(l.losses) > 0])
+
+        grad = tape.gradient(loss, model.trainable_variables)
+        # apply AGC
+        if config.agc:
+            grad = adaptive_clip_grad(model.trainable_variables, grad)
+        optimizer.apply_gradients(zip(grad, model.trainable_variables))
+
+        return y_p, sloss, dloss
+    return trainstep
+
+
+def generate_teststep(sed_loss, doa_loss):
+    @tf.function
+    def teststep(model, x, y, optimizer=None):
+        y_p = model(x, training=False)
         sloss = sed_loss(y[0], y_p[0])
         dloss = doa_loss(y[1], y_p[1])
-        
-        loss = sloss * loss_weight[0] + dloss * loss_weight[1]
-
-    grad = tape.gradient(loss, model.trainable_variables)
-    if agc:
-        grad = adaptive_clip_grad(model.trainable_variables, grad)
-    optimizer.apply_gradients(zip(grad, model.trainable_variables))
-
-    return y_p, sloss, dloss
-    
-
-@tf.function
-def teststep(model, x, y, sed_loss, doa_loss):
-    y_p = model(x, training=False)
-    sloss = sed_loss(y[0], y_p[0])
-    dloss = doa_loss(y[1], y_p[1])
-    return y_p, sloss, dloss
+        return y_p, sloss, dloss
+    return teststep
 
 
-def iterloop(model, dataset, sed_loss, doa_loss, metric_class, config, epoch, writer, optimizer=None, mode='train', label_path=None):
-    # metric
-    ER = tf.keras.metrics.Mean()
-    F = tf.keras.metrics.Mean()
-    DER = tf.keras.metrics.Mean()
-    DERF = tf.keras.metrics.Mean()
-    SeldScore = tf.keras.metrics.Mean()
-    ssloss = tf.keras.metrics.Mean()
-    ddloss = tf.keras.metrics.Mean()
+def generate_iterloop(sed_loss, doa_loss, evaluator, writer, 
+                      mode, loss_weights=None, config=None):
+    if mode == 'train':
+        step = generate_trainstep(sed_loss, doa_loss, loss_weights, config)
+    else:
+        step = generate_teststep(sed_loss, doa_loss)
+
+    def iterloop(model, dataset, epoch, optimizer=None):
+        evaluator.reset_states()
+        ssloss = tf.keras.metrics.Mean()
+        ddloss = tf.keras.metrics.Mean()
+
+        with tqdm(dataset) as pbar:
+            for x, y in pbar:
+                preds, sloss, dloss = step(model, x, y, optimizer)
+
+                evaluator.update_states(y, preds)
+                metric_values = evaluator.result()
+                seld_score = calculate_seld_score(metric_values)
+
+                ssloss(sloss)
+                ddloss(dloss)
+                pbar.set_postfix(
+                    OrderedDict({
+                        'mode': mode,
+                        'epoch': epoch, 
+                        'ER': metric_values[0].numpy(),
+                        'F': metric_values[1].numpy(),
+                        'DER': metric_values[2].numpy(),
+                        'DERF': metric_values[3].numpy(),
+                        'seldscore': seld_score.numpy()
+                    }))
+
+        writer.add_scalar(f'{mode}/{mode}_ErrorRate', metric_values[0].numpy(),
+                          epoch)
+        writer.add_scalar(f'{mode}/{mode}_F', metric_values[1].numpy(), epoch)
+        writer.add_scalar(f'{mode}/{mode}_DoaErrorRate', 
+                          metric_values[2].numpy(), epoch)
+        writer.add_scalar(f'{mode}/{mode}_DoaErrorRateF', 
+                          metric_values[3].numpy(), epoch)
+        writer.add_scalar(f'{mode}/{mode}_sedLoss', 
+                          ssloss.result().numpy(), epoch)
+        writer.add_scalar(f'{mode}/{mode}_doaLoss', 
+                          ddloss.result().numpy(), epoch)
+        writer.add_scalar(f'{mode}/{mode}_seldScore', 
+                          seld_score.numpy(), epoch)
+
+        return seld_score.numpy(), ssloss.result().numpy(), ddloss.result().numpy()
+    return iterloop
 
 
-    ER_2 = tf.keras.metrics.Mean()
-    F_2 = tf.keras.metrics.Mean()
-    SeldScore_2 = tf.keras.metrics.Mean()
-
-    loss_weight = [int(i) for i in config.loss_weight.split(',')]
-    from tqdm import tqdm
-    label_list = sorted(glob(os.path.join(label_path, '*.npy')))
-    splits = {
-        'train': [1, 2, 3, 4],
-        'val': [5],
-        'test': [6]
-    }    
-    label_list = [os.path.split(os.path.splitext(item)[0])[1] for item in label_list if int(item[item.rfind(os.path.sep)+5]) in splits[mode]]
-    i = 0 
-    seld_ = SELDMetrics_()
-    with tqdm(dataset) as pbar:
-        for x, y in pbar:
-            if mode == 'train':
-                preds, sloss, dloss = trainstep(model, x, y, sed_loss, doa_loss, loss_weight, optimizer, config.agc)
-            else:
-                preds, sloss, dloss = teststep(model, x, y, sed_loss, doa_loss)
-                
-
-            if mode == 'train':
-                metric_class.update_states(y, preds)
-                metric_values = metric_class.result()
-
-            else:
-                answer_class = tf.reshape(preds[0], (-1, preds[0].shape[2])) > 0.5
-                answer_direction = tf.reshape(preds[1], (-1, preds[1].shape[2]))
-                write_answer(config.output_path, label_list[i] + '.csv', answer_class, answer_direction)
-                pred = load_output_format_file(os.path.join(config.output_path,  label_list[i] + '.csv'))
-                pred = segment_labels(pred, answer_class.shape[0])
-                if mode == 'val':
-                    gt = load_output_format_file(os.path.join(config.ans_path + 'dev-val', label_list[i] + '.csv'))
-                if mode == 'test':
-                    gt = load_output_format_file(os.path.join(config.ans_path + 'dev-test', label_list[i] + '.csv'))
-                gt = convert_output_format_cartesian_to_polar(gt)
-                gt = segment_labels(gt, answer_class.shape[0])
-                seld_.update_seld_scores(pred, gt)
-                metric_values = seld_.compute_seld_scores()
+def random_ups_and_downs(x, y):
+    stddev = 0.25
+    offsets = tf.linspace(tf.random.normal([], stddev=stddev),
+                          tf.random.normal([], stddev=stddev),
+                          x.shape[-3])
+    offsets_shape = [1] * len(x.shape)
+    offsets_shape[-3] = offsets.shape[0]
+    offsets = tf.reshape(offsets, offsets_shape)
+    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], axis=-1)
+    return x, y
 
 
-                metric_class.update_states(y, preds)
-                metric_values_2 = metric_class.result()
-                seld_score_2 = calculate_seld_score(metric_values_2)
-                SeldScore_2(seld_score_2)
-                ER_2(metric_values_2[0])
-                F_2(metric_values_2[1]*100)
-            seld_score = calculate_seld_score(metric_values)
-
-            ssloss(sloss)
-            ddloss(dloss)
-            ER(metric_values[0])
-            F(metric_values[1]*100)
-            DER(metric_values[2])
-            DERF(metric_values[3]*100)
-            SeldScore(seld_score)
-
-            pbar.set_postfix(OrderedDict({
-                             'mode' : mode,
-                             'epoch' : epoch, 
-                             'ErrorRate' : ER.result().numpy(), 
-                             'F' : F.result().numpy(), 
-                             'sedLoss' : ssloss.result().numpy(),
-                             'doaLoss' : ddloss.result().numpy(),
-                             'seldScore' : SeldScore.result().numpy()
-                             }))
-            
-            i += 1
-    # print("F", F_2.result().numpy())
-    # print("Error rate", ER_2.result().numpy())
-    # print("seldscore", SeldScore_2.result().numpy())
-
-    recall, precision = metric_class.class_result()
-
-    writer.add_scalar(f'{mode}/{mode}_ErrorRate', ER.result().numpy(), epoch)
-    writer.add_scalar(f'{mode}/{mode}_F', F.result().numpy(), epoch)
-    writer.add_scalar(f'{mode}/{mode}_DoaErrorRate', 
-                      DER.result().numpy(), epoch)
-    writer.add_scalar(f'{mode}/{mode}_DoaErrorRateF', 
-                      DERF.result().numpy(), epoch)
-    writer.add_scalar(f'{mode}/{mode}_sedLoss', 
-                      ssloss.result().numpy(), epoch)
-    writer.add_scalar(f'{mode}/{mode}_doaLoss', 
-                      ddloss.result().numpy(), epoch)
-    writer.add_scalar(f'{mode}/{mode}_seldScore', 
-                      SeldScore.result().numpy(), epoch)
-
-    return SeldScore.result()
-
-
-def get_dataset(config, mode:str='train'):
+def get_dataset(config, mode: str = 'train'):
     path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
 
     x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
@@ -155,8 +144,9 @@ def get_dataset(config, mode:str='train'):
                              mode=mode, n_freq_bins=64)
     if config.use_tfm and mode == 'train':
         sample_transforms = [
-            lambda x, y: (mask(x, axis=-3, max_mask_size=config.time_mask_size), y),
-            lambda x, y: (mask(x, axis=-2, max_mask_size=config.freq_mask_size), y),
+            random_ups_and_downs,
+            # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
+            lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
         ]
     else:
         sample_transforms = []
@@ -175,121 +165,94 @@ def get_dataset(config, mode:str='train'):
     return dataset
 
 
-def get_both_dataset(config, mode:str='train'):
-    path = os.path.join(config.abspath, 'DCASE2020/feat_label/')
-    x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
-                             os.path.join(path, 'foa_dev_label'), 
-                             mode=mode, n_freq_bins=64)
-    mic_x, _ = load_seldnet_data(os.path.join(path, 'mic_dev_norm'),
-                             os.path.join(path, 'mic_dev_label'), 
-                             mode=mode, n_freq_bins=64)
-    x = np.concatenate([x, mic_x], -1)
+def ensemble_outputs(model, xs: list, 
+                     win_size=300, step_size=5, batch_size=256):
+    @tf.function
+    def predict(model, x, batch_size):
+        windows = tf.signal.frame(x, win_size, step_size, axis=0)
 
-    if mode == 'train' and config.use_tfm:
-        sample_transforms = [
-            # lambda x, y: (mask(x, axis=-3, max_mask_size=config.time_mask_size, n_mask=6), y),
-            # lambda x, y: (mask(x, axis=-2, max_mask_size=config.freq_mask_size), y),
-        ]
-    else:
-        sample_transforms = []
-    batch_transforms = [split_total_labels_to_sed_doa]
-    if config.use_acs and mode == 'train':
-        batch_transforms.insert(0, acs_aug)
-    dataset = seldnet_data_to_dataloader(
-        x, y,
-        train= mode == 'train',
-        batch_transforms=batch_transforms,
-        label_window_size=60,
-        batch_size=config.batch,
-        sample_transforms=sample_transforms,
-        loop_time=config.loop_time
-    )
-    return dataset
+        sed, doa = [], []
+        for i in range(int(np.ceil(windows.shape[0]/batch_size))):
+            s, d = model(windows[i*batch_size:(i+1)*batch_size], training=False)
+            sed.append(s)
+            doa.append(d)
+        sed = tf.concat(sed, axis=0)
+        doa = tf.concat(doa, axis=0)
+
+        # windows to seq
+        total_counts = tf.signal.overlap_and_add(
+            tf.ones((sed.shape[0], win_size//step_size), dtype=sed.dtype),
+            1)[..., tf.newaxis]
+        sed = tf.signal.overlap_and_add(tf.transpose(sed, (2, 0, 1)), 1)
+        sed = tf.transpose(sed, (1, 0)) / total_counts
+        doa = tf.signal.overlap_and_add(tf.transpose(doa, (2, 0, 1)), 1)
+        doa = tf.transpose(doa, (1, 0)) / total_counts
+
+        return sed, doa
+
+    # assume 0th dim of each sample is time dim
+    seds = []
+    doas = []
+    
+    for x in xs:
+        sed, doa = predict(model, x, batch_size)
+        seds.append(sed)
+        doas.append(doa)
+
+    return list(zip(seds, doas))
 
 
-def get_tdm_dataset(config, max_overlap_num=5, max_overlap_per_frame=2, min_overlap_sec=1, max_overlap_sec=5):
-    mode = 'foa'
-    abspath = '/media/data1/datasets/DCASE2020' if os.path.exists('/media/data1/datasets') else '/root/datasets/DCASE2020'
-    FEATURE_PATH = os.path.join(abspath, f'{mode}_dev')
-    LABEL_PATH = os.path.join(abspath, 'metadata_dev')
-    sr = 24000
-    x, y = load_wav_and_label(FEATURE_PATH,
-                                 LABEL_PATH)
+def generate_evaluate_fn(test_xs, test_ys, evaluator, batch_size=256,
+                         writer=None):
+    def evaluate_fn(model, epoch):
+        start = time.time()
+        evaluator.reset_states()
+        e_outs = ensemble_outputs(model, test_xs, batch_size=batch_size)
 
-    # 데이터 훑어서 aug용 데이터 뽑기
-    # 아래 코드들은 어차피 feature extractor부터 사용해야해서 파이토치로 짜도 무방할듯
-    print('TDM augmentation process start')
-    TDM_PATH = './'
-    tdm_x, tdm_y = get_TDMset(TDM_PATH)
-    x, y = TDM_aug(x, y, tdm_x, tdm_y, 
-                   max_overlap_num=max_overlap_num, 
-                   max_overlap_per_frame=max_overlap_per_frame, 
-                   min_overlap_sec=min_overlap_sec, 
-                   max_overlap_sec=max_overlap_sec)
-    del tdm_x, tdm_y
-    x = list(map(lambda x_: get_preprocessed_x_tf(x_, sr, mode=mode,
-                         n_mels=64, 
-                         multiplier=5,
-                         max_label_length=600,
-                         win_length=1024,
-                         hop_length=480,
-                         n_fft=1024), x)) 
-    x = tf.convert_to_tensor(x)
-    x = (x - tf.reduce_mean(x, 0)) / tf.math.reduce_std(x, 0)
+        for y, pred in zip(test_ys, e_outs):
+            evaluator.update_states(y, pred)
 
-    if config.use_tfm:
-        sample_transforms = [
-            lambda x, y: (mask(x, axis=-3, max_mask_size=config.time_mask_size), y),
-            lambda x, y: (mask(x, axis=-2, max_mask_size=config.freq_mask_size), y),
-        ]
-    else:
-        sample_transforms = []
+        metric_values = evaluator.result()
+        seld_score = calculate_seld_score(metric_values).numpy()
+        er, f, der, derf = list(map(lambda x: x.numpy(), metric_values))
 
-    # seldnet_data_to_dataloader
-    batch_transforms = [split_total_labels_to_sed_doa]
-    if config.use_acs:
-        batch_transforms.insert(0, foa_intensity_vec_aug)
-    dataset = seldnet_data_to_dataloader(
-        x, y,
-        train=True,
-        batch_transforms=batch_transforms,
-        label_window_size=60,
-        batch_size=config.batch,
-        sample_transforms=sample_transforms,
-        loop_time=config.loop_time
-    )
-    return dataset
+        if writer is not None:
+            writer.add_scalar('ENS_T/ER', er, epoch)
+            writer.add_scalar('ENS_T/F', f, epoch)
+            writer.add_scalar('ENS_T/DER', der, epoch)
+            writer.add_scalar('ENS_T/DERF', derf, epoch)
+            writer.add_scalar('ENS_T/seldScore', seld_score, epoch)
+        print('ensemble outputs')
+        print(f'ER: {er:4f}, F: {f:4f}, DER: {der:4f}, DERF: {derf:4f}, '
+              f'SELD: {seld_score:4f} '
+              f'({time.time()-start:.4f} secs)')
+        return seld_score, metric_values
+    return evaluate_fn
 
 
 def main(config):
     config, model_config = config[0], config[1]
 
-    tensorboard_path = os.path.join('./tensorboard_log', config.name)
-    if not os.path.exists(tensorboard_path):
-        print(f'tensorboard log directory: {tensorboard_path}')
-        os.makedirs(tensorboard_path)
-    writer = SummaryWriter(logdir=tensorboard_path)
+    # HyperParameters
+    n_classes = 12
+    swa_start_epoch = 80
+    swa_freq = 2
+    kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
 
-    model_path = os.path.join('./saved_model', config.name)
-    if not os.path.exists(model_path):
-        print(f'saved model directory: {model_path}')
-        os.makedirs(model_path)
+    
 
     # data load
-    if config.use_tdm:
-        overlap_num = 1
-        overlap_sec = 1
-        max_overlap_num = 3
-        max_overlap_sec = 3
-        trainset = get_tdm_dataset(config, 
-                                max_overlap_num=overlap_num, 
-                                max_overlap_per_frame=2, 
-                                min_overlap_sec=0.5, 
-                                max_overlap_sec=overlap_sec)
-    else:
-        trainset = get_dataset(config, 'train')
+    trainset = get_dataset(config, 'train')
     valset = get_dataset(config, 'val')
     testset = get_dataset(config, 'test')
+
+    path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
+    test_xs, test_ys = load_seldnet_data(
+        os.path.join(path, 'foa_dev_norm'),
+        os.path.join(path, 'foa_dev_label'), 
+        mode='test', n_freq_bins=64)
+    test_ys = list(map(
+        lambda x: split_total_labels_to_sed_doa(None, x)[-1], test_ys))
 
     # extract data size
     x, y = [(x, y) for x, y in trainset.take(1)][0]
@@ -302,92 +265,136 @@ def main(config):
     print()
     print('---------------------------------')
 
+    specific_search_space = {'num2d': search_space_2d['num'], 'num1d': search_space_1d['num']}
+    for i in range(specific_search_space['num2d'][-1] + specific_search_space['num1d'][-1]):
+        specific_search_space[f'BLOCK{i}'] = {
+            'search_space_2d': search_space_2d,
+            'search_space_1d': search_space_1d,
+        }
+
+    specific_search_space['SED'] = search_space_1d
+    specific_search_space['DOA'] = search_space_1d
+    search_space = specific_search_space
+    from config_sampler import get_config
+
+    origin_name = config.name
     # model load
-    n_classes = 12
-    model_config['n_classes'] = n_classes
-    model = getattr(models, config.model)(input_shape, model_config)
-    model.summary()
-    
-    optimizer = tf.keras.optimizers.Adam(learning_rate=config.lr)
-    if config.sed_loss == 'BCE':
-        sed_loss = tf.keras.losses.BinaryCrossentropy(name='sed_loss')
-    if config.sed_loss == 'FOCAL':
-        sed_loss = losses.Focal_Loss(alpha=config.focal_g, gamma=config.focal_a)
+    for num in range(32):
+        config.name = origin_name + f'_{num}'
+        tensorboard_path = os.path.join('./tensorboard_log', config.name)
+        if not os.path.exists(tensorboard_path):
+            print(f'tensorboard log directory: {tensorboard_path}')
+            os.makedirs(tensorboard_path)
+        writer = SummaryWriter(logdir=tensorboard_path)
 
-    try:
-        doa_loss = getattr(tf.keras.losses, config.doa_loss)
-    except:
-        doa_loss = getattr(losses, config.doa_loss)
+        model_path = os.path.join('./saved_model', config.name)
+        if not os.path.exists(model_path):
+            print(f'saved model directory: {model_path}')
+            os.makedirs(model_path)
 
-    if config.resume:
-        from glob import glob
-        _model_path = sorted(glob(model_path + '/*.hdf5'))
-        if len(_model_path) == 0:
-            raise ValueError('the model is not existing, resume fail')
-        model = tf.keras.models.load_model(_model_path[0])
-        if not config.use_tdm:
-            trainset = get_dataset(config, 'train')
-        valset = get_dataset(config, 'val')
-        testset = get_dataset(config, 'test')
+        from search_utils import postprocess_fn
+        import argparse
+        model_config = get_config(argparse.Namespace(n_classes=12), search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
+        model_config['n_classes'] = n_classes
+        model = getattr(models, config.model)(input_shape, model_config)
+        model.summary()
 
-    
-    best_score = 99999
-    early_stop_patience = 0
-    lr_decay_patience = 0
-    metric_class = SELDMetrics(
-        doa_threshold=config.lad_doa_thresh, n_classes=n_classes)
+        model = apply_kernel_regularizer(model, kernel_regularizer)
 
-    for epoch in range(config.epoch):
-        # tdm
-        if config.use_tdm and config.tdm_epoch != 0 and epoch % config.tdm_epoch == 0:
-            if epoch % 2 == 0 and epoch > 20:
-                if overlap_sec < max_overlap_sec:
-                    overlap_sec += 1
-                else:
-                    if overlap_num < max_overlap_num:
-                        overlap_sec = 1
-                        overlap_num += 1
-                print(f'current_max_overlap_sec: {overlap_sec}, current_max_overlap_num: {overlap_num}')
-
-            trainset = get_tdm_dataset(config, 
-                                        max_overlap_num=overlap_num, 
-                                        max_overlap_per_frame=2, 
-                                        min_overlap_sec=0.5, 
-                                        max_overlap_sec=overlap_sec)
-            
-        path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
-        label_path = os.path.join(path, 'foa_dev_label')
-        # train loop
-        metric_class.reset_states()
-        iterloop(model, trainset, sed_loss, doa_loss, metric_class, config, epoch, writer, optimizer=optimizer, mode='train', label_path=label_path) 
-
-        # validation loop
-        metric_class.reset_states()
-        score = iterloop(model, valset, sed_loss, doa_loss, metric_class, config, epoch, writer, mode='val', label_path=label_path)
-
-        # evaluation loop
-        metric_class.reset_states()
-        iterloop(model, testset, sed_loss, doa_loss, metric_class, config, epoch, writer, mode='test', label_path=label_path)
-
-        if best_score > score:
-            os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
-            best_score = score
-            early_stop_patience = 0
-            lr_decay_patience = 0
-            tf.keras.models.save_model(
-                model, 
-                os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
-                include_optimizer=False)
+        optimizer = tf.keras.optimizers.Adam(config.lr)
+        # optimizer = AdaBelief(config.lr)
+        if config.sed_loss == 'BCE':
+            sed_loss = tf.keras.backend.binary_crossentropy
         else:
-            if lr_decay_patience == config.lr_patience and config.decay != 1:
-                optimizer.learning_rate = optimizer.learning_rate * config.decay
-                print(f'lr: {optimizer.learning_rate.numpy()}')
+            sed_loss = losses.focal_loss
+        # fix doa_loss to MMSE_with_cls_weights (because of class weights)
+        # doa_loss = losses.MMSE_with_cls_weights
+        try:
+            doa_loss = getattr(tf.keras.losses, config.doa_loss)
+        except:
+            doa_loss = getattr(losses, config.doa_loss)
+
+        # stochastic weight averaging
+        swa = SWA(model, swa_start_epoch, swa_freq)
+
+        if config.resume:
+            _model_path = sorted(glob(model_path + '/*.hdf5'))
+            if len(_model_path) == 0:
+                raise ValueError('the model does not exist, cannot be resumed')
+            model = tf.keras.models.load_model(_model_path[0])
+
+        best_score = inf
+        early_stop_patience = 0
+        lr_decay_patience = 0
+        evaluator = SELDMetrics(
+            doa_threshold=config.lad_doa_thresh, n_classes=n_classes)
+
+        train_iterloop = generate_iterloop(
+            sed_loss, doa_loss, evaluator, writer, 'train', 
+            loss_weights=list(map(int, config.loss_weight.split(','))), config=config)
+        val_iterloop = generate_iterloop(
+            sed_loss, doa_loss, evaluator, writer, 'val')
+        test_iterloop = generate_iterloop(
+            sed_loss, doa_loss, evaluator, writer, 'test')
+        evaluate_fn = generate_evaluate_fn(
+            test_xs, test_ys, evaluator, config.batch*4, writer=writer)
+
+        val_slosses, val_dlosses, test_score, swa_score = [], [], [], []
+        for epoch in range(config.epoch):
+            if epoch == swa_start_epoch:
+                tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
+
+            if epoch % 10 == 0:
+                evaluate_fn(model, epoch)
+
+            # train loop
+            train_iterloop(model, trainset, epoch, optimizer)
+            score, val_sloss, val_dloss = val_iterloop(model, valset, epoch)
+            testscore, _, _ = test_iterloop(model, testset, epoch)
+            test_score.append(float(testscore))
+            val_slosses.append(float(val_sloss))
+            val_dlosses.append(float(val_dloss))
+
+            # swa.on_epoch_end(epoch)
+
+            if best_score > score:
+                os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
+                best_score = score
+                early_stop_patience = 0
                 lr_decay_patience = 0
-            if early_stop_patience == config.patience:
-                print(f'Early Stopping at {epoch}, score is {score}')
-                break
-            early_stop_patience += 1
-            lr_decay_patience += 1
+                tf.keras.models.save_model(
+                    model, 
+                    os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
+                    include_optimizer=False)
+            else:
+                '''
+                if lr_decay_patience == config.lr_patience and config.decay != 1:
+                    optimizer.learning_rate = optimizer.learning_rate * config.decay
+                    print(f'lr: {optimizer.learning_rate.numpy()}')
+                    lr_decay_patience = 0
+                '''
+                if early_stop_patience == config.patience:
+                    print(f'Early Stopping at {epoch}, score is {score}')
+                    break
+                early_stop_patience += 1
+                lr_decay_patience += 1
+
+        # end of training
+        # print(f'epoch: {epoch}')
+        # swa.on_train_end()
+
+        # seld_score, *_ = evaluate_fn(model, epoch)
+        # swa_score.append(seld_score)
+        if not os.path.exists('sampling_result'):
+            os.makedirs('sampling_result')
+        import json
+        with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
+            json.dump([model_config, val_slosses, val_dlosses, test_score], f, indent=4)
+
+        # tf.keras.models.save_model(
+        #     model, 
+        #     os.path.join(model_path, f'SWA_best_{seld_score:.5f}.hdf5'),
+        #     include_optimizer=False)
 
 
 if __name__=='__main__':
