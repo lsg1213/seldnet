@@ -29,18 +29,32 @@ def delete_unit(search_space, name, unit, writer):
     raise ValueErrorjson(search_space, name, unit, msg='nothing was deleted!!', writer=writer)
 
 
+def delete_dps(search_space, name, unit):
+    if isinstance(search_space, dict):
+        for space in search_space.keys():
+            if space == name:
+                del search_space[space]
+                return False # 성공
+            else:
+                if isinstance(search_space[space], dict):
+                    delete_dps(search_space[space], name, unit)
+    else:
+        return True
+
+
 def delete_stage(search_space, name, unit, writer):
     check = False
-    
-    for dimension in search_space[name[0]].keys():
-        try:
+
+    if name[0].startswith('BLOCK'):
+        for dimension in search_space[name[0]].keys():
             for layer in search_space[name[0]][dimension].keys():
                 if unit == layer:
                     check = True
                     del search_space[name[0]][dimension][unit]
                     break
-        except:
-            import pdb; pdb.set_trace()
+    else:
+        delete_dps(search_space, name[0], unit) # layer 자체를 제거할 때 사용
+        check = True
 
     if check:
         return search_space
@@ -71,11 +85,28 @@ def unit_filter(name, unit):
     return _stage_filter
 
 
+def used_layer_filter(name, unit):
+    def _used_layer_filter(result):
+        num = 0
+        for key in result['config'].keys():
+            if result['config'][key] == name[0]:
+                num += 1
+        return num != unit
+    return _used_layer_filter
+
+
 def result_filtering(results, name, unit):
     name = name.split('.')
     if len(name) == 1:
-        # stage filtering
-        results = list(filter(stage_filter(name, unit), results))
+        # stage filtering, start with BLOCK
+        if name[0].startswith('BLOCK') or name[0] in ['SED', 'DOA']:
+            results = list(filter(stage_filter(name, unit), results))
+        else:
+            import pdb; pdb.set_trace()
+            #conformer encoder 1개만 가진 search 제거 전 32개 후 27개 되어야함 print 다 해가면서 보기   
+            results = list(filter(used_layer_filter(name, unit), results))
+            import pdb; pdb.set_trace()
+
     elif len(name) == 2:
         # unit filtering
         results = list(filter(unit_filter(name, unit), results))
@@ -214,12 +245,15 @@ def analyzer(search_space, results, train_config):
                 common_features[k] = v
                 break
     # common_features = extract_feats_from_pairs(results)
+    max_block_num = len([k for k in common_features.keys() if k.startswith('BLOCK') and len(k) == 6])
+    block_num = []
 
     table = {feat: [] for feat in common_features}
     table[keyword] = []
 
     for result in results:
         perf = result['perf']
+        block_num.append(len([k for k in result['config'].keys() if k.startswith('BLOCK') and len(k) == 6]))
 
         for feat in common_features.keys():
             # find value
@@ -242,11 +276,11 @@ def analyzer(search_space, results, train_config):
         if isinstance(score, list):
             score = score[-1]
         table[keyword].append(score)
+    block_num = np.array(block_num)
 
     # table['count1d'] = [count_blocks(p['config']) for p in results]
     
-    total = [v for k, v in common_features.items() 
-                if k.startswith('BLOCK') or k in ['SED', 'DOA']]
+    total = [v for k, v in common_features.items() if k.startswith('BLOCK') or k in ['SED', 'DOA']]
     stages = total[0]
     for s in total[1:]:
         stages = stages.union(s)
@@ -272,13 +306,25 @@ def analyzer(search_space, results, train_config):
         if len(unique_values) == 1:
             continue
 
-        perfs = [table[keyword][table[rv] == value]
-                    for value in unique_values]
+        perfs = []
+        for value in unique_values:
+            try:
+                perfs.append(table[keyword][table[rv] == value])
+            except IndexError:
+                if rv.startswith('BLOCK'):
+                    block_index = int(rv.split('_ARGS.')[0].split('BLOCK')[-1])
+                    tmp_score = table[keyword][block_num - 1 >= block_index]
+                    perfs.append(tmp_score[table[rv] == value])
+        #perfs = [table[keyword][table[rv] == value]
+        #            for value in unique_values]
         pvalues = get_ks_test_values(
             unique_values, perfs, min_samples=train_config.min_samples, 
             a=train_config.threshold, verbose=train_config.verbose)
         n_samples = [len(p) for p in perfs]
+
         for i in range(len(pvalues)):
+            if len(pvalues[i]) == 0:
+                continue
             result_table.append([
                 [pvalues[i][0], np.min(perfs[i]), np.mean(perfs[i]), np.median(perfs[i]), np.max(perfs[i])], # [pvalue, min, mean, median, max]
                 rv,
