@@ -274,7 +274,7 @@ def main():
 
             # 결과 저장
             results.append({'config': model_configs, 'perf': outputs})
-            writer.dump(current_result_path, results)
+            writer.dump(results, current_result_path)
         
         
         # 분석
