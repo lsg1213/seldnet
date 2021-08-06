@@ -339,7 +339,7 @@ def main(config):
         evaluate_fn = generate_evaluate_fn(
             test_xs, test_ys, evaluator, config.batch*4, writer=writer)
 
-        val_slosses, val_dlosses, test_score, swa_score = [], [], [], []
+        val_slosses, val_dlosses, test_score, val_score = [], [], [], []
         for epoch in range(config.epoch):
             if epoch == swa_start_epoch:
                 tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
@@ -354,6 +354,7 @@ def main(config):
             test_score.append(float(testscore))
             val_slosses.append(float(val_sloss))
             val_dlosses.append(float(val_dloss))
+            val_score.append(float(score))
 
             # swa.on_epoch_end(epoch)
 
@@ -389,7 +390,7 @@ def main(config):
             os.makedirs('sampling_result')
         import json
         with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
-            json.dump([model_config, val_slosses, val_dlosses, test_score], f, indent=4)
+            json.dump([model_config, val_slosses, val_dlosses, test_score, val_score], f, indent=4)
 
         # tf.keras.models.save_model(
         #     model, 
