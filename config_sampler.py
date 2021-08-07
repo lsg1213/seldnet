@@ -62,6 +62,8 @@ def mother_stage_constraint(search_space, name, model_arg_config):
 def get_block_config(search_space, model_config, stage_name='BLOCK'):
     num2d = choice(search_space['num2d'])
     num1d = choice(search_space['num1d'])
+    max_block_num = max(search_space['num1d']) + max(search_space['num2d'])
+    identities = range(num1d + num2d, max_block_num)
     
     for i in range(num2d + num1d):
         name = stage_name + str(i)
@@ -96,6 +98,10 @@ def get_block_config(search_space, model_config, stage_name='BLOCK'):
             num1d -= 1
 
         model_config[name + '_ARGS'] = model_arg_config
+    
+    for i in identities:
+        model_config[f'BLOCK{i}'] = 'identity_block'
+        model_config[f'BLOCK{i}_ARGS'] = {}
 
 
 def get_config(train_config, search_space, input_shape, postprocess_fn=None):

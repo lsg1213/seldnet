@@ -40,8 +40,9 @@ input_shape = [300, 64, 7]
 
 
 '''            SEARCH SPACES           '''
+block_2d_num = [1, 2]
+block_1d_num = [0, 1, 2]
 search_space_2d = {
-    'num': [1, 2],
     'mother_stage':
         {'depth': [1, 2, 3],
         'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
@@ -57,7 +58,6 @@ search_space_2d = {
         'strides': [(1, 1), (1, 2), (1, 3)]},
 }
 search_space_1d = {
-    'num': [0, 1, 2],
     'bidirectional_GRU_stage':
         {'depth': [1, 2],
         'units': [16, 24, 32, 48, 64, 96, 128]}, 
@@ -76,7 +76,7 @@ search_space_1d = {
         {'depth': [1, 2],
         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
         'n_head': [1, 2, 4, 8, 16],
-        'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96],
+        'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64],
         'multiplier': [1, 2, 4],
         'pos_encoding': [None, 'basic', 'rff']},
 }
@@ -190,17 +190,17 @@ def get_dataset(config, mode: str = 'train'):
 def main():
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
-    if train_config.gpus != '-1':
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        print(gpus)
-        if gpus:
-            try:
-                tf.config.experimental.set_virtual_device_configuration(
-                    gpus[0],
-                    [tf.config.experimental.VirtualDeviceConfiguration(
-                        memory_limit=10240)])
-            except RuntimeError as e:
-                print(e)
+    # if train_config.gpus != '-1':
+    #     gpus = tf.config.experimental.list_physical_devices('GPU')
+    #     print(gpus)
+    #     if gpus:
+    #         try:
+    #             tf.config.experimental.set_virtual_device_configuration(
+    #                 gpus[0],
+    #                 [tf.config.experimental.VirtualDeviceConfiguration(
+    #                     memory_limit=10240)])
+    #         except RuntimeError as e:
+    #             print(e)
     del train_config.gpus
 
     writer = Writer(train_config)
@@ -245,7 +245,7 @@ def main():
             search_space = writer.load(search_space_path)
         else:
             # search space initializing
-            specific_search_space = {'num2d': search_space_2d['num'], 'num1d': search_space_1d['num']}
+            specific_search_space = {'num2d': block_2d_num, 'num1d': block_1d_num}
             for i in range(specific_search_space['num2d'][-1] + specific_search_space['num1d'][-1]):
                 specific_search_space[f'BLOCK{i}'] = {
                     'search_space_2d': search_space_2d,

@@ -1,4 +1,5 @@
 import json
+import os
 
 import numpy as np
 from scipy.stats import ks_2samp
@@ -17,13 +18,15 @@ def delete_unit(search_space, name, unit, writer):
         unit = json.loads(unit)
 
     for dimension in search_space[name[0]].keys():
-        for layer in search_space[name[0]][dimension].keys():
-            if layer != 'num':
-                if name[1] in search_space[name[0]][dimension][layer]:
-                    check = True
-                    if not (layer == 'mother_stage' and 'kernel_size' in name[1] and unit == 0):
-                        search_space[name[0]][dimension][layer][name[1]].remove(unit)
+        if dimension == 'num':
+            continue
 
+        if name[1] in search_space[name[0]][dimension].keys():
+            check = True
+            if not (dimension == 'mother_stage' and 'kernel_size' in name[1] and unit == 0):
+                search_space[name[0]][dimension][name[1]].remove(unit)
+            else:
+                raise ValueError('something wrong')
     if check:
         return search_space
     raise ValueErrorjson(search_space, name, unit, msg='nothing was deleted!!', writer=writer)
@@ -33,7 +36,7 @@ def delete_dps(search_space, name, unit):
     if isinstance(search_space, dict):
         for space in search_space.keys():
             if space == name:
-                del search_space[space]
+                del search_space[space][unit]
                 return False # 성공
             else:
                 if isinstance(search_space[space], dict):
@@ -45,10 +48,20 @@ def delete_dps(search_space, name, unit):
 def delete_stage(search_space, name, unit, writer):
     check = False
 
-    if name[0].startswith('BLOCK'):
+    if name[0] in ['SED','DOA']:
+        for stage in search_space[name[0]].keys():
+            if stage == 'num':
+                continue
+            if stage == unit:
+                check = True
+                del search_space[name[0]][unit]
+                break
+    elif name[0].startswith('BLOCK'):
         for dimension in search_space[name[0]].keys():
-            for layer in search_space[name[0]][dimension].keys():
-                if unit == layer:
+            for stage in search_space[name[0]][dimension]:
+                if stage == 'num':
+                    continue
+                if stage == unit:
                     check = True
                     del search_space[name[0]][dimension][unit]
                     break
@@ -75,7 +88,10 @@ def update_search_space(search_space, name, unit, writer):
 
 def stage_filter(name, unit):
     def _stage_filter(result):
-        return result['config'][name[0]] != unit
+        try:
+            return result['config'][name[0]] != unit
+        except:
+            import pdb; pdb.set_trace()
     return _stage_filter
     
 
@@ -102,10 +118,8 @@ def result_filtering(results, name, unit):
         if name[0].startswith('BLOCK') or name[0] in ['SED', 'DOA']:
             results = list(filter(stage_filter(name, unit), results))
         else:
-            import pdb; pdb.set_trace()
             #conformer encoder 1개만 가진 search 제거 전 32개 후 27개 되어야함 print 다 해가면서 보기   
             results = list(filter(used_layer_filter(name, unit), results))
-            import pdb; pdb.set_trace()
 
     elif len(name) == 2:
         # unit filtering
@@ -123,17 +137,16 @@ def narrow_search_space(search_space, table, results, writer):
     if len(table) == 0:
         return False, search_space
 
+    # stage 개수는 빼고 분석
+    table = list(filter(lambda x: not (x[-2] in stages_1d or x[-2] in stages_2d and not isinstance(x[-1], str)), table))
+
     table = sorted(table, key=lambda x: x[0][0]) # pvalue
     best = table[0]
     
-    comparison = []
-    for result in table:
-        if best[-2] == result[-2] and best[-1] != result[-1]:
-            comparison.append(result)
     
     low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
     removed_case = []
-    for case in comparison:
+    for case in table[1:]:
         if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
             removed_case.append({
                 'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
@@ -154,7 +167,13 @@ def narrow_search_space(search_space, table, results, writer):
             update_search_space(search_space, case[-2], case[-1], writer)
             results = result_filtering(results, case[-2], case[-1])
             check = True
-    writer.dump(removed_case, f'removed_space_{writer.index}.json')
+        
+        removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
+        if os.path.exists(removed_case_path):
+            prev_removed_case = writer.load(removed_case_path)
+            writer.dump(prev_removed_case + removed_case, removed_case_path)
+        else:
+            writer.dump(removed_case, removed_case_path)
     
     return check, search_space, results
 

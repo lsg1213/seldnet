@@ -14,9 +14,9 @@ class Unimplementation(Exception):
     def __str__(self):
         return self.msg
 
-
+print()
 class ValueErrorjson(ValueError):
-    def __init__(self, msg='unimplementation error', writer=None, *args):
+    def __init__(self, *args, msg='unimplementation error', writer=None):
         super(ValueErrorjson, self).__init__()
         self.msg = msg
         if writer != None:
