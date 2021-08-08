@@ -18,7 +18,7 @@ from swa import SWA
 from transforms import *
 from utils import adaptive_clip_grad, AdaBelief, apply_kernel_regularizer
 
-from search import search_space_1d, search_space_2d
+from search import search_space_1d, search_space_2d, block_1d_num, block_2d_num
 
 
 
@@ -264,9 +264,9 @@ def main(config):
     print(f'label shape(sed, doa): {sed_shape}, {doa_shape}')
     print()
     print('---------------------------------')
-
-    specific_search_space = {'num2d': search_space_2d['num'], 'num1d': search_space_1d['num']}
-    for i in range(specific_search_space['num2d'][-1] + specific_search_space['num1d'][-1]):
+    
+    specific_search_space = {'num2d': block_2d_num, 'num1d': block_1d_num}
+    for i in range(max(specific_search_space['num2d']) + max(specific_search_space['num1d'])):
         specific_search_space[f'BLOCK{i}'] = {
             'search_space_2d': search_space_2d,
             'search_space_1d': search_space_1d,
@@ -279,7 +279,7 @@ def main(config):
 
     origin_name = config.name
     # model load
-    for num in range(32):
+    for num in range(32, 48):
         config.name = origin_name + f'_{num}'
         tensorboard_path = os.path.join('./tensorboard_log', config.name)
         if not os.path.exists(tensorboard_path):
