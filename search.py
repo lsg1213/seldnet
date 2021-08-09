@@ -34,6 +34,7 @@ args.add_argument('--epoch', type=int, default=10)
 args.add_argument('--lr', type=int, default=1e-3)
 args.add_argument('--n_classes', type=int, default=12)
 args.add_argument('--gpus', type=str, default='-1')
+args.add_argument('--config', action='store_true', help='if true, reuse config')
 args.add_argument('--new', action='store_true')
 
 input_shape = [300, 64, 7]
@@ -90,6 +91,7 @@ def train_and_eval(train_config,
                    evaluator):
     try:
         model = models.conv_temporal(input_shape, model_config)
+        model.summary()
     except:
         print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
         os.makedirs('error_models')
@@ -190,6 +192,11 @@ def get_dataset(config, mode: str = 'train'):
 def main():
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
+    writer = Writer(train_config)
+    if train_config.config:
+        train_config = vars(train_config)
+        train_config.update(writer.load(os.path.join(os.path.join('result', train_config['name']), 'train_config.json')))
+        train_config = argparse.Namespace(**train_config)
     # if train_config.gpus != '-1':
     #     gpus = tf.config.experimental.list_physical_devices('GPU')
     #     print(gpus)
@@ -202,8 +209,7 @@ def main():
     #         except RuntimeError as e:
     #             print(e)
     del train_config.gpus
-
-    writer = Writer(train_config)
+    del train_config.config
     del train_config.new
 
     name = train_config.name
