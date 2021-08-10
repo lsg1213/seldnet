@@ -45,7 +45,7 @@ block_2d_num = [1, 2]
 block_1d_num = [0, 1, 2]
 search_space_2d = {
     'mother_stage':
-        {'depth': [1, 2, 3],
+        {'mother_depth': [1, 2, 3],
         'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
         'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
         'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
@@ -61,7 +61,7 @@ search_space_2d = {
 search_space_1d = {
     'bidirectional_GRU_stage':
         {'depth': [1, 2],
-        'units': [16, 24, 32, 48, 64, 96, 128]}, 
+        'gru_units': [16, 24, 32, 48, 64, 96, 128]}, 
     'transformer_encoder_stage':
         {'depth': [1, 2],
         'n_head': [1, 2, 4, 8, 16],
@@ -69,8 +69,8 @@ search_space_1d = {
         'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
         'kernel_size': [1, 3, 5]},
     'simple_dense_stage':
-        {'depth': [1, 2, 3],
-            'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+        {'depth': [1, 2],
+            'dense_units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
             'dense_activation': ['relu'],
             'dropout_rate': [0., 0.2, 0.5]},
     'conformer_encoder_stage':
@@ -258,8 +258,8 @@ def main():
                     'search_space_1d': search_space_1d,
                 }
 
-            specific_search_space['SED'] = search_space_1d
-            specific_search_space['DOA'] = search_space_1d
+            specific_search_space['SED'] = {'search_space_1d': search_space_1d}
+            specific_search_space['DOA'] = {'search_space_1d': search_space_1d}
             search_space = specific_search_space
             writer.dump(search_space, search_space_path)
 
@@ -288,12 +288,13 @@ def main():
         while check:
             table = analyzer(search_space, results, train_config)
             train_config.threshold = 1
-            tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold, table))
+            # 단순히 좁힐 게 있는 지 탐지
+            tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block', table))
             if len(tmp_table) == 0:
                 print('MODEL SEARCH COMPLETE!!')
                 return
             # search space 줄이기
-            check, search_space, results = narrow_search_space(search_space, tmp_table, results, writer)
+            check, search_space, results = narrow_search_space(search_space, table, results, train_config, writer)
 
         # search space 저장
         writer.dump(search_space, search_space_path)

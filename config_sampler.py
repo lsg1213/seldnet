@@ -8,7 +8,7 @@ from random import choice
 
 
 def get_classifier_config(search_space, model_config, stage_name):
-    sp = search_space[stage_name]
+    sp = search_space[stage_name]['search_space_1d']
     model_config[stage_name] = choice([i for i in sp.keys() if i != 'num'])
 
     model_arg_config = {}

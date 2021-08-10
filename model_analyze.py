@@ -20,15 +20,22 @@ def delete_unit(search_space, name, unit, writer):
     for dimension in search_space[name[0]].keys():
         if dimension == 'num':
             continue
-
-        if name[1] in search_space[name[0]][dimension].keys():
-            check = True
-            if not (dimension == 'mother_stage' and 'kernel_size' in name[1] and unit == 0):
-                search_space[name[0]][dimension][name[1]].remove(unit)
+        
+        for stage in search_space[name[0]][dimension].keys():
+            if not (stage == 'mother_stage' and 'kernel_size' in name[1] and unit == 0):
+                if search_space[name[0]][dimension][stage].get(name[1]) == None:
+                    continue
+                check = True
+                try:
+                    search_space[name[0]][dimension][stage][name[1]].remove(unit)
+                except:
+                    import pdb; pdb.set_trace()
             else:
-                raise ValueError('something wrong')
+                import pdb; pdb.set_trace()
+                raise ValueError('somthing wrong')
     if check:
         return search_space
+    import pdb; pdb.set_trace()
     raise ValueErrorjson(search_space, name, unit, msg='nothing was deleted!!', writer=writer)
 
 
@@ -48,17 +55,9 @@ def delete_dps(search_space, name, unit):
 def delete_stage(search_space, name, unit, writer):
     check = False
 
-    if name[0] in ['SED','DOA']:
-        for stage in search_space[name[0]].keys():
-            if stage == 'num':
-                continue
-            if stage == unit:
-                check = True
-                del search_space[name[0]][unit]
-                break
-    elif name[0].startswith('BLOCK'):
+    if name[0].startswith('BLOCK') or name[0] in ['SED','DOA']:
         for dimension in search_space[name[0]].keys():
-            for stage in search_space[name[0]][dimension]:
+            for stage in search_space[name[0]][dimension].keys():
                 if stage == 'num':
                     continue
                 if stage == unit:
@@ -71,6 +70,7 @@ def delete_stage(search_space, name, unit, writer):
 
     if check:
         return search_space
+    import pdb; pdb.set_trace()
     raise ValueErrorjson('nothing was deleted!!', writer, search_space, name, unit)
 
 
@@ -127,53 +127,82 @@ def result_filtering(results, name, unit):
     return results
 
 
-def narrow_search_space(search_space, table, results, writer):
+def table_filter(table, threshold=0.05):
+    def _table_filter(x):
+        if x[0][0] > threshold:
+            return False
+        if x[-2] == 'identity_block' or x[-1] == 'identity_block':
+            return False
+        if (x[-2] in stages_1d or x[-2] in stages_2d) and not isinstance(x[-1], str): # stage 개수는 빼고 분석
+            return False
+        if 'kernel_size' in x[-2] and x[-1] == 0:
+            return False
+        return True
+    # stage == 'mother_stage' and 'kernel_size' in name[1] and unit == 0
+    return list(filter(_table_filter, table))
+
+
+def narrow_search_space(search_space, table, results, train_config, writer):
     '''
         table: [pvalue, min, mean, median, max], name, unit
     '''
-    threshold = 1
     check = False
     
     if len(table) == 0:
         return False, search_space
 
     # stage 개수는 빼고 분석
-    table = list(filter(lambda x: not (x[-2] in stages_1d or x[-2] in stages_2d and not isinstance(x[-1], str)), table))
+    table = table_filter(table, train_config.threshold)
+    table = sorted(table, key=lambda x: x[0][0], reverse=True) # pvalue
 
-    table = sorted(table, key=lambda x: x[0][0]) # pvalue
-    best = table[0]
-    
-    
-    low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
-    removed_case = []
-    for case in table[1:]:
-        if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
-            removed_case.append({
-                'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
-                'min': f'{best[0][1]} vs {case[0][1]}',
-                'median': f'{best[0][3]} vs {case[0][3]}',
-                'result': f'{best[-1]} was deleted'
-            })
-            update_search_space(search_space, best[-2], best[-1], writer)
-            results = result_filtering(results, best[-2], best[-1])
-            check = True
-        elif case[0][1] > best[0][1] and case[0][3] > best[0][3]:
-            removed_case.append({
-                'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
-                'min': f'{best[0][1]} vs {case[0][1]}',
-                'median': f'{best[0][3]} vs {case[0][3]}',
-                'result': f'{case[-1]} was deleted'
-            })
-            update_search_space(search_space, case[-2], case[-1], writer)
-            results = result_filtering(results, case[-2], case[-1])
-            check = True
+    while len(table) > 0:
+        best = table.pop()
+
+        same_name_results = [i for i in table if i[-2] == best[-2]]
         
-        removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
-        if os.path.exists(removed_case_path):
-            prev_removed_case = writer.load(removed_case_path)
-            writer.dump(prev_removed_case + removed_case, removed_case_path)
-        else:
-            writer.dump(removed_case, removed_case_path)
+        low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
+        '''
+        table
+        1. pvalue 순서대로 sort(descending)
+        2. pop하기
+        3. for문 돌면서 table에 같은 거 다 골라내기
+        4. 그 다음 원래 도는 방법대로 하고 그동안 찾았던 것들 table에서 제거
+        '''
+
+        removed_case = []
+        for case in same_name_results:
+            if case[-1] == 2 or best[-1] == 2:
+                import pdb; pdb.set_trace()
+            if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
+                print(best[-2], best[-1])
+                removed_case.append({
+                    'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
+                    'min': f'{best[0][1]} vs {case[0][1]}',
+                    'median': f'{best[0][3]} vs {case[0][3]}',
+                    'result': f'{best[-1]} was deleted'
+                })
+                update_search_space(search_space, best[-2], best[-1], writer)
+                results = result_filtering(results, best[-2], best[-1])
+                check = True
+            elif case[0][1] > best[0][1] and case[0][3] > best[0][3]:
+                print(case[-2], case[-1])
+                removed_case.append({
+                    'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
+                    'min': f'{best[0][1]} vs {case[0][1]}',
+                    'median': f'{best[0][3]} vs {case[0][3]}',
+                    'result': f'{case[-1]} was deleted'
+                })
+                update_search_space(search_space, case[-2], case[-1], writer)
+                results = result_filtering(results, case[-2], case[-1])
+                check = True
+                table.remove(case)
+            
+            removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
+            if os.path.exists(removed_case_path):
+                prev_removed_case = writer.load(removed_case_path)
+                writer.dump(prev_removed_case + removed_case, removed_case_path)
+            else:
+                writer.dump(removed_case, removed_case_path)
     
     return check, search_space, results
 
@@ -192,7 +221,7 @@ def count_blocks(config, criteria=is_1d):
     return sum([criteria(config[key]) for key in keys])
 
 
-def get_ks_test_values(values, perfs, min_samples=1, a=0.05, verbose=False):
+def get_ks_test_values(values, perfs, min_samples=1, verbose=False):
     n_values = len(values)
     comb = list(combinations(range(n_values), 2))
     pvalues = [[] for _ in range(n_values)]
@@ -338,7 +367,7 @@ def analyzer(search_space, results, train_config):
         #            for value in unique_values]
         pvalues = get_ks_test_values(
             unique_values, perfs, min_samples=train_config.min_samples, 
-            a=train_config.threshold, verbose=train_config.verbose)
+            verbose=train_config.verbose)
         n_samples = [len(p) for p in perfs]
 
         for i in range(len(pvalues)):
@@ -349,4 +378,15 @@ def analyzer(search_space, results, train_config):
                 rv,
                 unique_values[i]
             ])
+        # print(rv)
+        # for i, pv in enumerate(pvalues):
+        #     print(f'{unique_values[i]}: '
+        #             f'[{min(pv):.5f}, {max(pv):.5f}] '
+        #             f'({np.mean(pv):.5f}) '
+        #             f'n_samples={len(perfs[i])}, '
+        #             f'{keyword}(min={np.min(perfs[i]):.5f}, '
+        #             f'mean={np.mean(perfs[i]):.5f}, '
+        #             f'median={np.median(perfs[i]):.5f}, '
+        #             f'max={np.max(perfs[i]):.5f})')
+        # print()
     return result_table

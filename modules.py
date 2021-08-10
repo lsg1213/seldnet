@@ -47,7 +47,7 @@ def simple_conv_block(model_config: dict):
 
 
 def mother_stage(model_config: dict):
-    depth = model_config['depth']
+    depth = model_config['mother_depth']
     strides = model_config['strides']
     model_config = copy.deepcopy(model_config)
 
@@ -69,9 +69,9 @@ def bidirectional_GRU_stage(model_config: dict):
         dropout_rate: (default=0.)
     '''
     depth = model_config['depth']
-    units = model_config['units']
+    units = model_config['gru_units']
     model_config = copy.deepcopy(model_config)
-    model_config['units'] = [units] * depth
+    model_config['gru_units'] = [units] * depth
 
     return bidirectional_GRU_block(model_config)
 
@@ -88,9 +88,9 @@ def simple_dense_stage(model_config: dict):
         kernel_regularizer: (default={'l1': 0., 'l2': 0.})
     '''
     depth = model_config['depth']
-    units = model_config['units']
+    units = model_config['dense_units']
     model_config = copy.deepcopy(model_config)
-    model_config['units'] = [units] * depth
+    model_config['dense_units'] = [units] * depth
     model_config['dense_activation'] = model_config.get('activation', None)
     
     return simple_dense_block(model_config)
@@ -258,7 +258,7 @@ def mother_block(model_config: dict):
 """            BLOCKS WITH 1D OUTPUTS            """
 def bidirectional_GRU_block(model_config: dict):
     # mandatory parameters
-    units_per_layer = model_config['units']
+    units_per_layer = model_config['gru_units']
 
     dropout_rate = model_config.get('dropout_rate', 0.)
 
@@ -279,7 +279,7 @@ def bidirectional_GRU_block(model_config: dict):
 def simple_dense_block(model_config: dict):
     # assumes 1D inputs
     # mandatory parameters
-    units_per_layer = model_config['units']
+    units_per_layer = model_config['dense_units']
 
     kernel_size = model_config.get('kernel_size', 1)
     activation = model_config.get('dense_activation', None)
