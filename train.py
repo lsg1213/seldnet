@@ -272,8 +272,8 @@ def main(config):
             'search_space_1d': search_space_1d,
         }
 
-    specific_search_space['SED'] = search_space_1d
-    specific_search_space['DOA'] = search_space_1d
+    specific_search_space['SED'] = {'search_space_1d': search_space_1d}
+    specific_search_space['DOA'] = {'search_space_1d': search_space_1d}
     search_space = specific_search_space
     from config_sampler import get_config
 
