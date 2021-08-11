@@ -175,14 +175,17 @@ def get_max_configs(train_config, search_space, input_shape, postprocess_fn):
     # SED, DOA part
     for model_config in model_configs:
         for SED, DOA in product(search_space[f'SED']['search_space_1d'].keys(), search_space[f'DOA']['search_space_1d'].keys()):
-            model_config['SED'], model_config['DOA'] = SED, DOA
-            model_config['SED_ARGS'], model_config['DOA_ARGS'] = {}, {}
+            model_config['SED'] = SED
+            model_config['SED_ARGS'] = {}
+            model_config['DOA'] = DOA
+            model_config['DOA_ARGS'] = {}
 
             for key, value in search_space[f'SED']['search_space_1d'][SED].items():
                 if isinstance(value[0], int):
                     model_config[f'SED_ARGS'][key] = max(value)
                 elif isinstance(value[0], str):
                     model_config[f'SED_ARGS'][key] = value[-1]
+                    
             for key, value in search_space[f'DOA']['search_space_1d'][DOA].items():
                 if isinstance(value[0], int):
                     model_config[f'DOA_ARGS'][key] = max(value)
