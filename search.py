@@ -244,7 +244,6 @@ def main():
         # resume
         if os.path.exists(current_result_path):
             results = writer.load(current_result_path)
-
         # search space
         search_space_path = os.path.join(writer.result_path, f'search_space_{writer.index}.json')
         if os.path.exists(search_space_path):
@@ -285,19 +284,19 @@ def main():
         
         # 분석
         check = True
+        table = analyzer(search_space, results, train_config)
+        tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block', table))
+        if len(tmp_table) == 0:
+            print('MODEL SEARCH COMPLETE!!')
+            return
+
         while check:
             table = analyzer(search_space, results, train_config)
             train_config.threshold = 1
             # 단순히 좁힐 게 있는 지 탐지
             tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block', table))
-            if len(tmp_table) == 0:
-                print('MODEL SEARCH COMPLETE!!')
-                return
             # search space 줄이기
             check, search_space, results = narrow_search_space(search_space, table, results, train_config, writer)
-
-        # search space 저장
-        writer.dump(search_space, search_space_path)
 
 
 if __name__=='__main__':
