@@ -292,7 +292,6 @@ def main():
 
         while check:
             table = analyzer(search_space, results, train_config)
-            train_config.threshold = 1
             # 단순히 좁힐 게 있는 지 탐지
             tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block', table))
             # search space 줄이기
@@ -301,3 +300,4 @@ def main():
 
 if __name__=='__main__':
     main()
+
