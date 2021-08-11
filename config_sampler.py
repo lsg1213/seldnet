@@ -157,6 +157,8 @@ def get_max_configs(train_config, search_space, input_shape, postprocess_fn):
                             tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = sorted(value, key=lambda x: sum(x))[0]
                         else:
                             tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = sorted(value, key=lambda x: sum(x))[-1]
+                    elif isinstance(value[0], str):
+                        tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = value[-1]
                 queue.append((current_block_num + 1, tmp_config))
         elif current_block_num < num1d + num2d:
             for stage in stages_1d:
