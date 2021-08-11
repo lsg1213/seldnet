@@ -150,7 +150,7 @@ def get_max_configs(train_config, search_space, input_shape, postprocess_fn):
                 tmp_config[f'BLOCK{current_block_num}'] = stage
                 tmp_config[f'BLOCK{current_block_num}_ARGS'] = {}
                 for key, value in search_space[f'BLOCK{current_block_num}']['search_space_2d'][stage].items():
-                    if isinstance(value[0], int):
+                    if isinstance(value[0], (int, float)):
                         tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = max(value)
                     elif isinstance(value[0], (list, tuple)):
                         if 'strides' in key:
@@ -165,9 +165,8 @@ def get_max_configs(train_config, search_space, input_shape, postprocess_fn):
                 tmp_config = deepcopy(model_config)
                 tmp_config[f'BLOCK{current_block_num}'] = stage
                 tmp_config[f'BLOCK{current_block_num}_ARGS'] = {}
-                
                 for key, value in search_space[f'BLOCK{current_block_num}']['search_space_1d'][stage].items():
-                    if isinstance(value[0], int):
+                    if isinstance(value[0], (int, float)):
                         tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = max(value)
                     elif isinstance(value[0], str):
                         tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = value[-1]

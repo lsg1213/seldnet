@@ -11,7 +11,7 @@ import models
 
 train_config = args.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
-train_config.n_repeats = 1
+train_config.n_repeat = 1
 
 block_2d_num = max(block_2d_num)
 block_1d_num = max(block_1d_num)
