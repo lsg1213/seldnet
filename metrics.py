@@ -24,7 +24,7 @@ def get_objective_score(outputs, weights=[1,1,1]):
         raise ValueError('epoch should be > 1')
     
     score = weights[0] * (val_seld_score) +\
-            weights[1] * (K[-1] - K[-2]) +\
+            weights[1] * exp(K[-1] - K[-2]) +\
             weights[2] * exp(val_loss[-1] - val_loss[0])
             # weights[2] * sign(val_loss[-1] - val_loss[0]) * (log10(abs(val_loss[-1] - val_loss[0])))
     return score

@@ -23,8 +23,8 @@ args.add_argument('--name', type=str, required=True,
                   help='name must be {name}_{divided index} ex) 2021_1')
 args.add_argument('--dataset_path', type=str, 
                   default='/root/datasets/DCASE2021/feat_label')
-args.add_argument('--n_samples', type=int, default=4)
-args.add_argument('--min_samples', type=int, default=0)
+args.add_argument('--n_samples', type=int, default=500)
+args.add_argument('--min_samples', type=int, default=32)
 args.add_argument('--verbose', action='store_true')
 args.add_argument('--threshold', type=float, default=0.05)
 
