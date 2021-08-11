@@ -1,10 +1,13 @@
 import copy
 import random
+from random import choice
 from collections import OrderedDict
+from itertools import product
+from copy import deepcopy
 
 from utils import *
 from search_utils import search_space_sanity_check
-from random import choice
+from modules import stages_1d, stages_2d
 
 
 def get_classifier_config(search_space, model_config, stage_name):
@@ -119,7 +122,74 @@ def get_config(train_config, search_space, input_shape, postprocess_fn=None):
     if postprocess_fn:
         model_config = postprocess_fn(model_config)
     return model_config
-    
+
+
+def get_max_configs(train_config, search_space, input_shape, postprocess_fn):
+    model_configs = []
+    num2d = search_space['num2d']
+    num1d = search_space['num1d']
+    blocks = [i for i in search_space.keys() if not 'num' in i]
+
+    queue = [(0, None)]
+    # blocks
+    while len(queue) > 0:
+        current_block_num, model_config = queue[0]
+        del queue[0]
+        if model_config == None:
+            model_config = {
+                'n_classes': train_config.n_classes
+            }
+        elif len([i for i in model_config.keys() if i.startswith('BLOCK') and not '_ARGS' in i]) == num1d + num2d:
+            model_configs.append(model_config)
+            continue
+
+        if current_block_num < num2d:
+            for stage in stages_2d:
+                tmp_config = deepcopy(model_config)
+                
+                tmp_config[f'BLOCK{current_block_num}'] = stage
+                tmp_config[f'BLOCK{current_block_num}_ARGS'] = {}
+                for key, value in search_space[f'BLOCK{current_block_num}']['search_space_2d'][stage].items():
+                    if isinstance(value[0], int):
+                        tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = max(value)
+                    elif isinstance(value[0], list):
+                        if 'strides' in key:
+                            tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = sorted(value, key=lambda x: sum(x))[0]
+                        else:
+                            tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = sorted(value, key=lambda x: sum(x))[-1]
+                queue.append((current_block_num + 1, tmp_config))
+        elif current_block_num < num1d + num2d:
+            for stage in stages_1d:
+                tmp_config = deepcopy(model_config)
+                tmp_config[f'BLOCK{current_block_num}'] = stage
+                tmp_config[f'BLOCK{current_block_num}_ARGS'] = {}
+                
+                for key, value in search_space[f'BLOCK{current_block_num}']['search_space_1d'][stage].items():
+                    if isinstance(value[0], int):
+                        tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = max(value)
+                    elif isinstance(value[0], str):
+                        tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = value[-1]
+                queue.append((current_block_num + 1, tmp_config))
+
+    # SED, DOA part
+    for model_config in model_configs:
+        for SED, DOA in product(search_space[f'SED']['search_space_1d'].keys(), search_space[f'DOA']['search_space_1d'].keys()):
+            model_config['SED'], model_config['DOA'] = SED, DOA
+            model_config['SED_ARGS'], model_config['DOA_ARGS'] = {}, {}
+
+            for key, value in search_space[f'SED']['search_space_1d'][SED].items():
+                if isinstance(value[0], int):
+                    model_config[f'SED_ARGS'][key] = max(value)
+                elif isinstance(value[0], str):
+                    model_config[f'SED_ARGS'][key] = value[-1]
+            for key, value in search_space[f'DOA']['search_space_1d'][DOA].items():
+                if isinstance(value[0], int):
+                    model_config[f'DOA_ARGS'][key] = max(value)
+                elif isinstance(value[0], str):
+                    model_config[f'DOA_ARGS'][key] = value[-1]
+        if postprocess_fn:
+            model_config = postprocess_fn(model_config)
+    return model_configs
 
 def config_sampling(search_space: OrderedDict):
     sample = copy.deepcopy(search_space)

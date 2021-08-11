@@ -26,16 +26,11 @@ def delete_unit(search_space, name, unit, writer):
                 if search_space[name[0]][dimension][stage].get(name[1]) == None:
                     continue
                 check = True
-                try:
-                    search_space[name[0]][dimension][stage][name[1]].remove(unit)
-                except:
-                    import pdb; pdb.set_trace()
+                search_space[name[0]][dimension][stage][name[1]].remove(unit)
             else:
-                import pdb; pdb.set_trace()
                 raise ValueError('somthing wrong')
     if check:
         return search_space
-    import pdb; pdb.set_trace()
     raise ValueErrorjson(search_space, name, unit, msg='nothing was deleted!!', writer=writer)
 
 
@@ -70,7 +65,6 @@ def delete_stage(search_space, name, unit, writer):
 
     if check:
         return search_space
-    import pdb; pdb.set_trace()
     raise ValueErrorjson('nothing was deleted!!', writer, search_space, name, unit)
 
 
@@ -88,14 +82,13 @@ def update_search_space(search_space, name, unit, writer):
 
 def stage_filter(name, unit):
     def _stage_filter(result):
-        try:
-            return result['config'][name[0]] != unit
-        except:
-            import pdb; pdb.set_trace()
+        return result['config'][name[0]] != unit
     return _stage_filter
     
 
 def unit_filter(name, unit):
+    if isinstance(unit, str):
+        unit = json.loads(unit)
     def _stage_filter(result):
         return result['config'][name[0]][name[1]] != unit
     return _stage_filter
@@ -149,61 +142,58 @@ def narrow_search_space(search_space, table, results, train_config, writer):
     check = False
     
     if len(table) == 0:
-        return False, search_space
+        return False, search_space, results
 
     # stage 개수는 빼고 분석
     table = table_filter(table, train_config.threshold)
     table = sorted(table, key=lambda x: x[0][0], reverse=True) # pvalue
 
-    while len(table) > 0:
-        best = table.pop()
+    best = table.pop()
 
-        same_name_results = [i for i in table if i[-2] == best[-2]]
-        
-        low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
-        '''
-        table
-        1. pvalue 순서대로 sort(descending)
-        2. pop하기
-        3. for문 돌면서 table에 같은 거 다 골라내기
-        4. 그 다음 원래 도는 방법대로 하고 그동안 찾았던 것들 table에서 제거
-        '''
-
-        removed_case = []
-        for case in same_name_results:
-            if case[-1] == 2 or best[-1] == 2:
-                import pdb; pdb.set_trace()
-            if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
-                print(best[-2], best[-1])
-                removed_case.append({
-                    'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
-                    'min': f'{best[0][1]} vs {case[0][1]}',
-                    'median': f'{best[0][3]} vs {case[0][3]}',
-                    'result': f'{best[-1]} was deleted'
-                })
-                update_search_space(search_space, best[-2], best[-1], writer)
-                results = result_filtering(results, best[-2], best[-1])
-                check = True
-            elif case[0][1] > best[0][1] and case[0][3] > best[0][3]:
-                print(case[-2], case[-1])
-                removed_case.append({
-                    'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
-                    'min': f'{best[0][1]} vs {case[0][1]}',
-                    'median': f'{best[0][3]} vs {case[0][3]}',
-                    'result': f'{case[-1]} was deleted'
-                })
-                update_search_space(search_space, case[-2], case[-1], writer)
-                results = result_filtering(results, case[-2], case[-1])
-                check = True
-                table.remove(case)
-            
-            removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
-            if os.path.exists(removed_case_path):
-                prev_removed_case = writer.load(removed_case_path)
-                writer.dump(prev_removed_case + removed_case, removed_case_path)
-            else:
-                writer.dump(removed_case, removed_case_path)
+    same_name_results = [i for i in table if i[-2] == best[-2]]
     
+    low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
+    '''
+    table
+    1. pvalue 순서대로 sort(descending)
+    2. pop하기
+    3. for문 돌면서 table에 같은 거 다 골라내기
+    4. 그 다음 원래 도는 방법대로 하고 그동안 찾았던 것들 table에서 제거
+    '''
+
+    removed_case = []
+    for case in same_name_results:
+        if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
+            print(best[-2], best[-1])
+            removed_case.append({
+                'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
+                'min': f'{best[0][1]} vs {case[0][1]}',
+                'median': f'{best[0][3]} vs {case[0][3]}',
+                'result': f'{best[-1]} was deleted'
+            })
+            update_search_space(search_space, best[-2], best[-1], writer)
+            results = result_filtering(results, best[-2], best[-1])
+            check = True
+            break
+        elif case[0][1] > best[0][1] and case[0][3] > best[0][3]:
+            print(case[-2], case[-1])
+            removed_case.append({
+                'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
+                'min': f'{best[0][1]} vs {case[0][1]}',
+                'median': f'{best[0][3]} vs {case[0][3]}',
+                'result': f'{case[-1]} was deleted'
+            })
+            update_search_space(search_space, case[-2], case[-1], writer)
+            results = result_filtering(results, case[-2], case[-1])
+            check = True
+            table.remove(case)
+        
+        removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
+        if os.path.exists(removed_case_path):
+            prev_removed_case = writer.load(removed_case_path)
+            writer.dump(prev_removed_case + removed_case, removed_case_path)
+        else:
+            writer.dump(removed_case, removed_case_path)
     return check, search_space, results
 
 
