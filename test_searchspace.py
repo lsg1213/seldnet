@@ -11,6 +11,7 @@ import models
 
 train_config = args.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
+train_config.n_repeats = 1
 
 block_2d_num = max(block_2d_num)
 block_1d_num = max(block_1d_num)
@@ -31,7 +32,6 @@ trainset = get_dataset(train_config, mode='train')
 
 for model_config in model_configs:
     optimizer = tf.keras.optimizers.Adam(train_config.lr)
-
     model = models.conv_temporal([300,64,7], model_config)
     model.summary()
 
@@ -39,7 +39,10 @@ for model_config in model_configs:
                   loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
                         'doa_out': tf.keras.losses.MSE},
                   loss_weights=[1, 1000])
+    for k,v in model_config.items():
+        print(k)
+        print(v)
+        print('------------------------------------')
     model.fit(trainset)
 print('All search space is available in this GPU')
-
 

@@ -152,7 +152,7 @@ def get_max_configs(train_config, search_space, input_shape, postprocess_fn):
                 for key, value in search_space[f'BLOCK{current_block_num}']['search_space_2d'][stage].items():
                     if isinstance(value[0], int):
                         tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = max(value)
-                    elif isinstance(value[0], list):
+                    elif isinstance(value[0], (list, tuple)):
                         if 'strides' in key:
                             tmp_config[f'BLOCK{current_block_num}_ARGS'][key] = sorted(value, key=lambda x: sum(x))[0]
                         else:
