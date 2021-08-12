@@ -30,7 +30,7 @@ args.add_argument('--threshold', type=float, default=0.05)
 
 args.add_argument('--batch_size', type=int, default=256)
 args.add_argument('--n_repeat', type=int, default=5)
-args.add_argument('--epoch', type=int, default=10)
+args.add_argument('--epoch', type=int, default=12)
 args.add_argument('--lr', type=float, default=1e-3)
 args.add_argument('--n_classes', type=int, default=12)
 args.add_argument('--gpus', type=str, default='-1')
