@@ -5,7 +5,7 @@ from data_utils import radian_to_degree
 from utils import safe_div
 
 
-def ema(data, n=10):
+def ema(data, n=4):
     emas = []
     for i in data:
         if len(emas) == 0:
@@ -19,7 +19,7 @@ def get_objective_score(outputs, weights=[1,1,1]):
     val_loss = outputs['val_loss']
     val_seld_score = outputs['val_seld_score'][-1]
     
-    K = ema(val_loss, n=len(val_loss))
+    K = ema(val_loss, n=4)
     if len(K) < 2:
         raise ValueError('epoch should be > 1')
     
