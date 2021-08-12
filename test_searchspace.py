@@ -45,7 +45,7 @@ for model_config in model_configs:
         print(v)
         print('------------------------------------')
     with open('too_big_search.json', 'w') as f:
-        json.dump(model_config, f)
+        json.dump(model_config, f, indent=4)
     model.fit(trainset)
     os.system('rm -rf too_big_search.json')
 print('All search space is available in this GPU')

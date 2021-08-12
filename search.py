@@ -46,9 +46,9 @@ block_1d_num = [0, 1, 2]
 search_space_2d = {
     'mother_stage':
         {'mother_depth': [1, 2, 3],
-        'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
-        'filters1': [3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
-        'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64],
+        'filters0': [0, 3, 4, 6, 8, 12, 16, 24, 32],
+        'filters1': [3, 4, 6, 8, 12, 16, 24, 32],
+        'filters2': [0, 3, 4, 6, 8, 12, 16, 24, 32],
         'kernel_size0': [1, 3, 5],
         'kernel_size1': [1, 3, 5],
         'kernel_size2': [1, 3, 5],
@@ -61,23 +61,23 @@ search_space_2d = {
 search_space_1d = {
     'bidirectional_GRU_stage':
         {'depth': [1, 2],
-        'gru_units': [16, 24, 32, 48, 64, 96, 128]}, 
+        'gru_units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
     'transformer_encoder_stage':
         {'depth': [1, 2],
-        'n_head': [1, 2, 4, 8, 16],
-        'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-        'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
-        'kernel_size': [1, 3, 5]},
+        'n_head': [1, 2, 4],
+        'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32],
+        'ff_multiplier': [0.25, 0.5, 1, 2],
+        'transformer_kernel_size': [1, 3, 5]},
     'simple_dense_stage':
         {'depth': [1, 2],
-            'dense_units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128],
+            'dense_units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 256],
             'dense_activation': ['relu'],
             'dropout_rate': [0., 0.2, 0.5]},
     'conformer_encoder_stage':
-        {'depth': [1, 2],
-        'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-        'n_head': [1, 2, 4, 8, 16],
-        'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64],
+        {'conformer_depth': [1, ],
+        'key_dim': [2, 3, 4, 6, 8, 12, 16],
+        'n_head': [1, 2, 4],
+        'conformer_kernel_size': [4, 6, 8, 12, 16],
         'multiplier': [1, 2, 4],
         'pos_encoding': [None, 'basic', 'rff']},
 }

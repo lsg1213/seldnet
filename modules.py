@@ -135,7 +135,7 @@ def conformer_encoder_stage(model_config: dict):
         pos_encoding: (default=basic)
         kernel_regularizer: (default={'l1': 0., 'l2': 0.})
     '''
-    depth = model_config['depth']
+    depth = model_config['conformer_depth']
 
     def stage(x):
         inputs = force_1d_inputs()(x)
@@ -309,7 +309,7 @@ def transformer_encoder_block(model_config: dict):
     n_head = model_config['n_head']
     key_dim = model_config['key_dim']
     ff_multiplier = model_config['ff_multiplier'] # default to 4 
-    kernel_size = model_config['kernel_size'] # default to 1
+    kernel_size = model_config['transformer_kernel_size'] # default to 1
 
     activation = model_config.get('activation', 'relu')
     dropout_rate = model_config.get('dropout_rate', 0.1)
@@ -340,7 +340,7 @@ def conformer_encoder_block(model_config: dict):
     # mandatory parameters
     key_dim = model_config.get('key_dim', 36)
     n_head = model_config.get('n_head', 4)
-    kernel_size = model_config.get('kernel_size', 32) # 32 
+    kernel_size = model_config.get('conformer_kernel_size', 32) # 32 
     activation = model_config.get('activation', 'swish')
     dropout_rate = model_config.get('dropout_rate', 0.1)
     multiplier = model_config.get('multiplier', 4)
