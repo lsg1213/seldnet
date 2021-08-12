@@ -31,7 +31,7 @@ args.add_argument('--threshold', type=float, default=0.05)
 args.add_argument('--batch_size', type=int, default=256)
 args.add_argument('--n_repeat', type=int, default=5)
 args.add_argument('--epoch', type=int, default=10)
-args.add_argument('--lr', type=int, default=1e-3)
+args.add_argument('--lr', type=float, default=1e-3)
 args.add_argument('--n_classes', type=int, default=12)
 args.add_argument('--gpus', type=str, default='-1')
 args.add_argument('--config', action='store_true', help='if true, reuse config')
@@ -88,9 +88,16 @@ def train_and_eval(train_config,
                    input_shape,
                    trainset: tf.data.Dataset,
                    valset: tf.data.Dataset,
-                   evaluator):
+                   evaluator,
+                   mirrored_strategy):
     try:
-        model = models.conv_temporal(input_shape, model_config)
+        optimizer = tf.keras.optimizers.Adam(train_config.lr)
+        with mirrored_strategy.scope():
+            model = models.conv_temporal(input_shape, model_config)
+            model.compile(optimizer=optimizer,
+                        loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
+                                'doa_out': tf.keras.losses.MSE},
+                        loss_weights=[1, 1000])
         model.summary()
     except:
         print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
@@ -105,40 +112,35 @@ def train_and_eval(train_config,
         with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
             json.dump(model_config, f, indent=4)
 
-    optimizer = tf.keras.optimizers.Adam(train_config.lr)
-
-    model.compile(optimizer=optimizer,
-                  loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
-                        'doa_out': tf.keras.losses.MSE},
-                  loss_weights=[1, 1000])
     performances = {}
-    for epoch in range(train_config.epoch):
-        history = model.fit(trainset,
-                            validation_data=valset).history
-        if len(performances) == 0:
-            for k, v in history.items():
-                performances[k] = v
-        else:
-            for k, v in history.items():
-                performances[k] += v
 
-        evaluator.reset_states()
-        for x, y in valset:
-            evaluator.update_states(y, model(x, training=False))
-        scores = evaluator.result()
-        scores = {
-            'val_error_rate': scores[0].numpy().tolist(),
-            'val_f1score': scores[1].numpy().tolist(),
-            'val_der': scores[2].numpy().tolist(),
-            'val_derf': scores[3].numpy().tolist(),
-            'val_seld_score': calculate_seld_score(scores).numpy().tolist(),
-        }
-        if 'val_error_rate' in performances.keys():
-            for k, v in scores.items():
-                performances[k].append(v)
-        else:
-            for k, v in scores.items():
-                performances[k] = [v]
+    history = model.fit(trainset, validation_data=valset, epochs=train_config.epoch).history
+
+    if len(performances) == 0:
+        for k, v in history.items():
+            performances[k] = v
+    else:
+        for k, v in history.items():
+            performances[k] += v
+
+    evaluator.reset_states()
+    for x, y in valset:
+        y_p = model(x, training=False)
+        evaluator.update_states(y, y_p)
+    scores = evaluator.result()
+    scores = {
+        'val_error_rate': scores[0].numpy().tolist(),
+        'val_f1score': scores[1].numpy().tolist(),
+        'val_der': scores[2].numpy().tolist(),
+        'val_derf': scores[3].numpy().tolist(),
+        'val_seld_score': calculate_seld_score(scores).numpy().tolist(),
+    }
+    if 'val_error_rate' in performances.keys():
+        for k, v in scores.items():
+            performances[k].append(v)
+    else:
+        for k, v in scores.items():
+            performances[k] = [v]
 
     performances.update({
         'flops': get_flops(model),
@@ -187,6 +189,7 @@ def get_dataset(config, mode: str = 'train'):
         loop_time=config.n_repeat
     )
 
+    # return dataset.prefetch(tf.data.experimental.AUTOTUNE)
     return dataset
 
 
@@ -194,6 +197,7 @@ def main():
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
     writer = Writer(train_config)
+    mirrored_strategy = tf.distribute.MirroredStrategy()
     if train_config.config:
         train_config = vars(train_config)
         train_config.update(writer.load(os.path.join(os.path.join('result', train_config['name']), 'train_config.json')))
@@ -220,13 +224,10 @@ def main():
     input_shape = [300, 64, 7]
 
     # datasets
-    trainset = get_dataset(train_config, mode='train').prefetch(tf.data.experimental.AUTOTUNE)
-    valset = get_dataset(train_config, mode='val').prefetch(tf.data.experimental.AUTOTUNE)
-
-    # input shape
-    input_shape = [x.shape for x, _ in trainset.take(1)][0]
-    print(f'input_shape: {input_shape}')
-
+    with mirrored_strategy.scope():
+        trainset = get_dataset(train_config, mode='train')
+        valset = get_dataset(train_config, mode='val')
+    
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
 
@@ -276,7 +277,7 @@ def main():
             outputs = train_and_eval(
                 train_config, model_configs, 
                 input_shape, 
-                trainset, valset, evaluator)
+                trainset, valset, evaluator, mirrored_strategy)
             outputs['time'] = time.time() - start
 
             # eval
