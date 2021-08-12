@@ -94,7 +94,8 @@ def train_and_eval(train_config,
         model.summary()
     except:
         print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
-        os.makedirs('error_models')
+        if not os.path.exists('error_models'):
+            os.makedirs('error_models')
         configs = []
         if os.path.exists(os.path.join('error_models', 'error_model.json')):
             with open(os.path.join('error_models', 'error_model.json'), 'r') as f:
@@ -219,9 +220,13 @@ def main():
     input_shape = [300, 64, 7]
 
     # datasets
-    trainset = get_dataset(train_config, mode='train')
-    valset = get_dataset(train_config, mode='val')
-    
+    trainset = get_dataset(train_config, mode='train').prefetch(tf.data.experimental.AUTOTUNE)
+    valset = get_dataset(train_config, mode='val').prefetch(tf.data.experimental.AUTOTUNE)
+
+    # input shape
+    input_shape = [x.shape for x, _ in trainset.take(1)][0]
+    print(f'input_shape: {input_shape}')
+
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
 
