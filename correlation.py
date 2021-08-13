@@ -9,6 +9,7 @@ import argparse
 
 arg = argparse.ArgumentParser()
 arg.add_argument('--cor', action='store_true')
+arg.add_argument('--outlier', action='store_true')
 arg.add_argument('--epoch', type=int, default=10)
 arg.add_argument('--start', type=int, default=1)
 arg.add_argument('--end', type=int, default=50)
@@ -24,7 +25,7 @@ def ema(data, n=4):
             emas.append(i * (2 / (1 + n)) + emas[-1] * (1 - (2 / (1 + n))))
     return emas
 
-def get_objective_score(val_score, total_loss, val_ema_subtract_loss):
+def get_objective_score(val_finalscore, total_loss, val_ema_subtract_loss):
     # score = weights[0] * (val_seld_score) +\
     #         weights[1] * exp(K[-1] - K[-2]) +\
     #         weights[2] * exp(val_loss[-1] - val_loss[0])
@@ -35,7 +36,7 @@ def get_objective_score(val_score, total_loss, val_ema_subtract_loss):
             val_subtract_loss[:,i] = 1
         else:
             val_subtract_loss[:,i] = total_loss[:,i] - total_loss[:,0]
-    return val_score + np.exp(val_subtract_loss) + np.exp(val_ema_subtract_loss)
+    return val_finalscore
 
 '''
     loss: [sample_num, epoch]
@@ -50,6 +51,7 @@ def main():
     val_emadloss = []
     val_emasloss = []
     val_score = []
+    val_finalscore = []
     val_ema_subtract_loss = []
     test_seldscore = []
 
@@ -58,19 +60,21 @@ def main():
             result = json.load(f) # [model_config, val_slosses, val_dlosses, test_score, val_score]
         if len(result) == 4:
             os.system(f'rm -rf {fp}')
-        if result[3][-51] > 0.85:
-            continue
-
+        # if result[3][-51] > 0.95:
+        #     continue
+        
         dema = ema(result[2])
         sema = ema(result[1])
         totalema = ema(result[2] * 1000 + result[1])
         val_dloss.append([result[2][epoch - 1] for epoch in range(start_epoch, end_epoch)])
         val_sloss.append([result[1][epoch - 1] for epoch in range(start_epoch, end_epoch)])
-        val_ema_subtract_loss.append([totalema[epoch] - totalema[epoch - 1] for epoch in range(start_epoch, end_epoch)])
-        val_emadloss.append([dema[epoch - 1] - dema[epoch - 1 - 1] for epoch in range(start_epoch, end_epoch)])
-        val_emasloss.append([sema[epoch - 1] - sema[epoch - 1 - 1] for epoch in range(start_epoch, end_epoch)])
+        val_ema_subtract_loss.append([totalema[epoch - 1] - totalema[epoch - 1 - 1] if epoch > 1 else 0 for epoch in range(start_epoch, end_epoch)])
+        val_emadloss.append([dema[epoch - 1] - dema[epoch - 1 - 1] if epoch > 1 else 0 for epoch in range(start_epoch, end_epoch)])
+        val_emasloss.append([sema[epoch - 1] - sema[epoch - 1 - 1] if epoch > 1 else 0 for epoch in range(start_epoch, end_epoch)])
         test_seldscore.append([np.array(result[3][-51]) for epoch in range(start_epoch, end_epoch)])
-        val_score.append([np.array(result[4][-51]) for epoch in range(start_epoch, end_epoch)])
+        val_score.append([np.array(result[4][epoch - 1 - 1]) for epoch in range(start_epoch, end_epoch)])
+        val_finalscore.append([np.array(result[4][-51]) for epoch in range(start_epoch, end_epoch)])
+
     val_sloss = np.array(val_sloss) # (model num, epoch,)
     val_dloss = np.array(val_dloss)
     val_emadloss = np.array(val_emadloss)
@@ -78,16 +82,33 @@ def main():
     val_ema_subtract_loss = np.array(val_ema_subtract_loss)
     val_score = np.array(val_score)
     test_seldscore = np.array(test_seldscore) # (model num,)
+    val_finalscore = np.array(val_finalscore)
 
     total_loss = 1000 * np.array(val_dloss) + np.array(val_sloss)
-     # x : (model num, valloss) y: (model num, score)
-    objective_score = get_objective_score(val_score, total_loss, val_ema_subtract_loss)
+    
+    # x : (model num, valloss) y: (model num, score)
+    objective_score = get_objective_score(val_finalscore, total_loss, val_ema_subtract_loss)
+
+    # filter
+    if config.outlier:
+        condition = np.where(objective_score[:,7] < 3)
+        objective_score = objective_score[condition]
+        test_seldscore = test_seldscore[condition]
+        val_sloss = val_sloss[condition]
+        val_dloss = val_dloss[condition]
+        val_emadloss = val_emadloss[condition]
+        val_emasloss = val_emasloss[condition]
+        val_ema_subtract_loss = val_ema_subtract_loss[condition]
+        val_score = val_score[condition]
+        val_finalscore = val_finalscore[condition]
+        total_loss = total_loss[condition]
+
+
     if config.cor:   
         # data = np.corrcoef(np.concatenate([val_emasloss + val_emadloss * 1000, test_seldscore[...,:1]], -1).T)
-        data = np.corrcoef(np.concatenate([objective_score, test_seldscore[...,:1]], -1).T)
-        row_indices = [str(i) for i in range(start_epoch, end_epoch)] + ['test_score']
-        
-        column_names = [str(i) for i in range(start_epoch, end_epoch)] + ['test_score']
+        data = np.corrcoef(np.concatenate([objective_score[...,1:], test_seldscore[...,:1]], -1).T)
+        row_indices = [str(i) for i in range(start_epoch + 1, end_epoch)] + ['test_score']
+        column_names = [str(i) for i in range(start_epoch + 1, end_epoch)] + ['test_score']
         data_df = pd.DataFrame(data, index=row_indices, columns=column_names)
         corr = data_df.corr()
         sns.heatmap(corr,
@@ -120,7 +141,7 @@ def main():
     ax3.scatter(test_seldscore, np.minimum(val_sloss, val_sloss.min() * 2), norm=False)
     ax4.scatter(test_seldscore, val_emasloss + val_emadloss * 1000)
     ax5.scatter(test_seldscore, val_emadloss)
-    ax6.scatter(test_seldscore, val_emasloss)
+    ax6.scatter(test_seldscore, val_score)
 
     ax1.set_ylabel('weighted total_loss')
     ax2.set_ylabel('objective score')
