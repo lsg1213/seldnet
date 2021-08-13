@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from copy import deepcopy
 from glob import glob
 
 
@@ -15,7 +16,10 @@ class Writer:
             os.system(f'rm -rf {os.path.join(self.result_path, "*")}')
 
     def train_config_dump(self):
-        self.dump(self.train_config, self.train_config_path)
+        tmp = deepcopy(self.train_config)
+        if 'multi' in tmp.keys():
+            del tmp['multi']
+        self.dump(tmp, self.train_config_path)
 
     def train_config_load(self):
         return self.load(self.train_config_path)
