@@ -111,6 +111,7 @@ def train_and_eval(train_config,
             configs = [model_config]
         with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
             json.dump(model_config, f, indent=4)
+        exit()
 
     performances = {}
 
@@ -270,14 +271,21 @@ def main():
 
         current_number = len(results)
         for number in range(current_number, train_config.n_samples):
-            model_configs = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
+            while True:
+                model_configs = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
 
-            # 학습
-            start = time.time()
-            outputs = train_and_eval(
-                train_config, model_configs, 
-                input_shape, 
-                trainset, valset, evaluator, mirrored_strategy)
+                # 학습
+                start = time.time()
+                try:
+                    outputs = train_and_eval(
+                        train_config, model_configs, 
+                        input_shape, 
+                        trainset, valset, evaluator, mirrored_strategy)
+                    break
+                except ValueError:
+                    print('Model config error! RETRY')
+                    continue
+
             outputs['time'] = time.time() - start
 
             # eval
