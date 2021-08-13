@@ -36,6 +36,9 @@ args.add_argument('--n_classes', type=int, default=12)
 args.add_argument('--gpus', type=str, default='-1')
 args.add_argument('--config', action='store_true', help='if true, reuse config')
 args.add_argument('--new', action='store_true')
+args.add_argument('--multi', action='store_true')
+args.add_argument('--score', action='store_true')
+
 
 input_shape = [300, 64, 7]
 
@@ -92,12 +95,20 @@ def train_and_eval(train_config,
                    mirrored_strategy):
     try:
         optimizer = tf.keras.optimizers.Adam(train_config.lr)
-        with mirrored_strategy.scope():
+        if train_config.multi:
+            with mirrored_strategy.scope():
+                model = models.conv_temporal(input_shape, model_config)
+                model.compile(optimizer=optimizer,
+                            loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
+                                    'doa_out': tf.keras.losses.MSE},
+                            loss_weights=[1, 1000])
+        else:
             model = models.conv_temporal(input_shape, model_config)
             model.compile(optimizer=optimizer,
                         loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
                                 'doa_out': tf.keras.losses.MSE},
                         loss_weights=[1, 1000])
+
         model.summary()
     except:
         print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
@@ -225,7 +236,11 @@ def main():
     input_shape = [300, 64, 7]
 
     # datasets
-    with mirrored_strategy.scope():
+    if train_config.multi:
+        with mirrored_strategy.scope():
+            trainset = get_dataset(train_config, mode='train')
+            valset = get_dataset(train_config, mode='val')
+    else:
         trainset = get_dataset(train_config, mode='train')
         valset = get_dataset(train_config, mode='val')
     
@@ -288,7 +303,11 @@ def main():
             outputs['time'] = time.time() - start
 
             # eval
-            outputs['objective_score'] = get_objective_score(outputs)
+            if train_config.score:
+                import pdb; pdb.set_trace()
+                outputs['objective_score'] = outputs['val_seld_score']
+            else:
+                outputs['objective_score'] = get_objective_score(outputs)
 
             # 결과 저장
             results.append({'config': model_configs, 'perf': outputs})
