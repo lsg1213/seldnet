@@ -111,7 +111,7 @@ def train_and_eval(train_config,
             configs = [model_config]
         with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
             json.dump(model_config, f, indent=4)
-        exit()
+        return True
 
     performances = {}
 
@@ -276,15 +276,14 @@ def main():
 
                 # 학습
                 start = time.time()
-                try:
-                    outputs = train_and_eval(
-                        train_config, model_configs, 
-                        input_shape, 
-                        trainset, valset, evaluator, mirrored_strategy)
-                    break
-                except ValueError:
+                outputs = train_and_eval(
+                    train_config, model_configs, 
+                    input_shape, 
+                    trainset, valset, evaluator, mirrored_strategy)
+                if isinstance(outputs, bool) and outputs == False:
                     print('Model config error! RETRY')
                     continue
+                break
 
             outputs['time'] = time.time() - start
 
