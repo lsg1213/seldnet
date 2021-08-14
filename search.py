@@ -300,7 +300,7 @@ def main():
                     train_config, model_configs, 
                     input_shape, 
                     trainset, valset, evaluator, mirrored_strategy)
-                if isinstance(outputs, bool) and outputs == False:
+                if isinstance(outputs, bool) and outputs == True:
                     print('Model config error! RETRY')
                     continue
                 break
