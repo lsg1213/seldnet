@@ -16,9 +16,10 @@ class Writer:
             os.system(f'rm -rf {os.path.join(self.result_path, "*")}')
 
     def train_config_dump(self):
-        tmp = deepcopy(self.train_config)
+        tmp = vars(deepcopy(self.train_config))
         if 'multi' in tmp.keys():
             del tmp['multi']
+            tmp = argparse.Namespace(**tmp)
         self.dump(tmp, self.train_config_path)
 
     def train_config_load(self):

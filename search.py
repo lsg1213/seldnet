@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import time
+from copy import deepcopy
 
 import tensorflow as tf
 
@@ -251,8 +252,12 @@ def main():
         writer.train_config_dump()
     else:
         loaded_train_config = writer.train_config_load()
-        if loaded_train_config != vars(train_config):
-            for k, v in vars(train_config).items():
+        tmp = deepcopy(vars(train_config))
+        if 'multi' in tmp:
+            del tmp['multi']
+            
+        if loaded_train_config != tmp:
+            for k, v in tmp.items():
                 print(k, ':', v)
             raise ValueError('train config doesn\'t match')
 
@@ -304,8 +309,7 @@ def main():
 
             # eval
             if train_config.score:
-                import pdb; pdb.set_trace()
-                outputs['objective_score'] = outputs['val_seld_score']
+                outputs['objective_score'] = np.array(outputs['val_seld_score'])[-1]
             else:
                 outputs['objective_score'] = get_objective_score(outputs)
 
