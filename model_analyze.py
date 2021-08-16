@@ -196,7 +196,7 @@ def narrow_search_space(search_space, entier_table, table, results, train_config
         removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
         if os.path.exists(removed_case_path):
             prev_removed_case = writer.load(removed_case_path)
-            tmp = rev_removed_case + removed_case
+            tmp = prev_removed_case + removed_case
             new = []
             for v in tmp:
                 if v not in new:
