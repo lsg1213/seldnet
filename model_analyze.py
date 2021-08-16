@@ -135,7 +135,7 @@ def table_filter(table, threshold=0.05):
     return list(filter(_table_filter, table))
 
 
-def narrow_search_space(search_space, entier_table, table, results, train_config, writer):
+def narrow_search_space(search_space, entire_table, table, results, train_config, writer):
     '''
         entire_table: entire analyzed data, shape=[pvalue, min, mean, median, max], name, unit
         table: filtered analyzed data, shape=[pvalue, min, mean, median, max], name, unit
@@ -150,8 +150,8 @@ def narrow_search_space(search_space, entier_table, table, results, train_config
         return False, search_space, results
 
     best = table.pop()
-
-    same_name_results = [i for i in entier_table if i[-2] == best[-2]]
+    entire_table.remove(best)
+    same_name_results = [i for i in entire_table if i[-2] == best[-2]]
     
     low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
     '''
