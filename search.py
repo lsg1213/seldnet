@@ -321,7 +321,7 @@ def main():
         # 분석
         check = True
         table = analyzer(search_space, results, train_config)
-        tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block', table))
+        tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block' and x[-1] != 'identity_block', table))
         if len(tmp_table) == 0:
             print('MODEL SEARCH COMPLETE!!')
             return
