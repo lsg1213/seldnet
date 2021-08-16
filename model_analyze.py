@@ -141,13 +141,13 @@ def narrow_search_space(search_space, entier_table, table, results, train_config
         table: filtered analyzed data, shape=[pvalue, min, mean, median, max], name, unit
     '''
     check = False
-    
-    if len(table) == 0:
-        return False, search_space, results
 
     # stage 개수는 빼고 분석
     table = table_filter(table, train_config.threshold)
     table = sorted(table, key=lambda x: x[0][0], reverse=True) # pvalue
+
+    if len(table) == 0:
+        return False, search_space, results
 
     best = table.pop()
 
@@ -167,6 +167,7 @@ def narrow_search_space(search_space, entier_table, table, results, train_config
     idx = 0
     while idx < max_idx:
         case = same_name_results[idx]
+        idx += 1
         if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
             print(best[-2], best[-1])
             removed_case.append({
@@ -193,17 +194,17 @@ def narrow_search_space(search_space, entier_table, table, results, train_config
             same_name_results.remove(case)
             max_idx -= 1
         
-        removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
-        if os.path.exists(removed_case_path):
-            prev_removed_case = writer.load(removed_case_path)
-            tmp = prev_removed_case + removed_case
-            new = []
-            for v in tmp:
-                if v not in new:
-                    new.append(v)
-            writer.dump(new, removed_case_path)
-        else:
-            writer.dump(removed_case, removed_case_path)
+    removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
+    if os.path.exists(removed_case_path):
+        prev_removed_case = writer.load(removed_case_path)
+        tmp = prev_removed_case + removed_case
+        new = []
+        for v in tmp:
+            if v not in new:
+                new.append(v)
+        writer.dump(new, removed_case_path)
+    else:
+        writer.dump(removed_case, removed_case_path)
     return check, search_space, results
 
 
