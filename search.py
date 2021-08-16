@@ -261,7 +261,7 @@ def main():
                 print(k, ':', v)
             raise ValueError('train config doesn\'t match')
 
-    
+    writer.index = 0
     while True:
         writer.index += 1 # 차수
 
@@ -328,11 +328,11 @@ def main():
 
         while check:
             table = analyzer(search_space, results, train_config)
+            table = list(filter(lambda x: x[-2] != 'identity_block' and x[-1] != 'identity_block', table))
             # 단순히 좁힐 게 있는 지 탐지
-            tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block' and x[-1] != 'identity_block', table))
+            tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold, table))
             # search space 줄이기
-            check, search_space, results = narrow_search_space(search_space, table, results, train_config, writer)
-
+            check, search_space, results = narrow_search_space(search_space, table, tmp_table, results, train_config, writer)
 
 if __name__=='__main__':
     main()

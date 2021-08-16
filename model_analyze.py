@@ -135,9 +135,10 @@ def table_filter(table, threshold=0.05):
     return list(filter(_table_filter, table))
 
 
-def narrow_search_space(search_space, table, results, train_config, writer):
+def narrow_search_space(search_space, entier_table, table, results, train_config, writer):
     '''
-        table: [pvalue, min, mean, median, max], name, unit
+        entire_table: entire analyzed data, shape=[pvalue, min, mean, median, max], name, unit
+        table: filtered analyzed data, shape=[pvalue, min, mean, median, max], name, unit
     '''
     check = False
     
@@ -150,7 +151,7 @@ def narrow_search_space(search_space, table, results, train_config, writer):
 
     best = table.pop()
 
-    same_name_results = [i for i in table if i[-2] == best[-2]]
+    same_name_results = [i for i in entier_table if i[-2] == best[-2]]
     
     low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
     '''
@@ -162,7 +163,10 @@ def narrow_search_space(search_space, table, results, train_config, writer):
     '''
 
     removed_case = []
-    for case in same_name_results:
+    max_idx = len(same_name_results)
+    idx = 0
+    while idx < max_idx:
+        case = same_name_results[idx]
         if case[0][1] <= best[0][1] and case[0][3] <= best[0][3]: # min과 median 비교
             print(best[-2], best[-1])
             removed_case.append({
@@ -186,12 +190,18 @@ def narrow_search_space(search_space, table, results, train_config, writer):
             update_search_space(search_space, case[-2], case[-1], writer)
             results = result_filtering(results, case[-2], case[-1])
             check = True
-            table.remove(case)
+            same_name_results.remove(case)
+            max_idx -= 1
         
         removed_case_path = os.path.join(writer.result_path, f'removed_space_{writer.index}.json')
         if os.path.exists(removed_case_path):
             prev_removed_case = writer.load(removed_case_path)
-            writer.dump(prev_removed_case + removed_case, removed_case_path)
+            tmp = rev_removed_case + removed_case
+            new = []
+            for v in tmp:
+                if v not in new:
+                    new.append(v)
+            writer.dump(new, removed_case_path)
         else:
             writer.dump(removed_case, removed_case_path)
     return check, search_space, results
