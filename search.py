@@ -87,6 +87,31 @@ search_space_1d = {
 }
 
 
+def get_batch_size(train_config, input_shape, model_config, mirrored_strategy, trainset, valset):
+    various_lr = [train_config.lr / i ** 2 for i in range(1, 5)]
+    model = models.conv_temporal(input_shape, model_config) 
+    weights = model.get_weights()
+    val_losses = []
+    for lr in various_lr:
+        optimizer = tf.keras.optimizers.Adam(lr)
+        model.set_weights(weights)
+        if train_config.multi:
+            with mirrored_strategy.scope():
+                model = models.conv_temporal(input_shape, model_config)
+                model.compile(optimizer=optimizer,
+                            loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
+                                    'doa_out': tf.keras.losses.MSE},
+                            loss_weights=[1, 1000])
+        else:
+            model.compile(optimizer=optimizer,
+                        loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
+                                'doa_out': tf.keras.losses.MSE},
+                        loss_weights=[1, 1000])
+        history = model.fit(trainset, validation_data=valset).history
+        val_losses.append(history['val_loss'])
+    return various_lr[tf.concat(val_losses, 0).numpy().argmin()], weights
+
+
 def train_and_eval(train_config,
                    model_config: dict,
                    input_shape,
@@ -95,20 +120,7 @@ def train_and_eval(train_config,
                    evaluator,
                    mirrored_strategy):
 
-    various_lr = [train_config.lr / i ** 2 for i in range(1, 5)]
-    model = models.conv_temporal(input_shape, model_config) 
-    weights = model.get_weights()
-    val_losses = []
-    for lr in various_lr:
-        optimizer = tf.keras.optimizers.Adam(lr)
-        model.set_weights(weights)
-        model.compile(optimizer=optimizer,
-                    loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
-                            'doa_out': tf.keras.losses.MSE},
-                    loss_weights=[1, 1000])
-        history = model.fit(trainset, validation_data=valset).history
-        val_losses.append(history['val_loss'])
-    selected_lr = various_lr[tf.concat(val_losses, 0).numpy().argmin()]
+    selected_lr, weights = get_batch_size(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
     performances = {}
     try:
         optimizer = tf.keras.optimizers.Adam(selected_lr)
