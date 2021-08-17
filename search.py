@@ -94,8 +94,24 @@ def train_and_eval(train_config,
                    valset: tf.data.Dataset,
                    evaluator,
                    mirrored_strategy):
+
+    various_lr = [train_config.lr / i ** 2 for i in range(1, 5)]
+    model = models.conv_temporal(input_shape, model_config) 
+    weights = model.get_weights()
+    val_losses = []
+    for lr in various_lr:
+        optimizer = tf.keras.optimizers.Adam(lr)
+        model.set_weights(weights)
+        model.compile(optimizer=optimizer,
+                    loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
+                            'doa_out': tf.keras.losses.MSE},
+                    loss_weights=[1, 1000])
+        history = model.fit(trainset, validation_data=valset).history
+        val_losses.append(history['val_loss'])
+    selected_lr = various_lr[tf.concat(val_losses, 0).numpy().argmin()]
+    performances = {}
     try:
-        optimizer = tf.keras.optimizers.Adam(train_config.lr)
+        optimizer = tf.keras.optimizers.Adam(selected_lr)
         if train_config.multi:
             with mirrored_strategy.scope():
                 model = models.conv_temporal(input_shape, model_config)
@@ -123,10 +139,8 @@ def train_and_eval(train_config,
             configs = [model_config]
         with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
             json.dump(model_config, f, indent=4)
-        return True
-
-    performances = {}
-
+        return True    
+    model.set_weights(weights)
     history = model.fit(trainset, validation_data=valset, epochs=train_config.epoch).history
 
     if len(performances) == 0:
@@ -147,6 +161,7 @@ def train_and_eval(train_config,
         'val_der': scores[2].numpy().tolist(),
         'val_derf': scores[3].numpy().tolist(),
         'val_seld_score': calculate_seld_score(scores).numpy().tolist(),
+        'selected_lr': selected_lr
     }
     if 'val_error_rate' in performances.keys():
         for k, v in scores.items():
@@ -275,7 +290,7 @@ def main():
         search_space_path = os.path.join(writer.result_path, f'search_space_{writer.index}.json')
         if os.path.exists(search_space_path):
             search_space = writer.load(search_space_path)
-        else:
+        elif writer.index == 1:
             # search space initializing
             specific_search_space = {'num2d': block_2d_num, 'num1d': block_1d_num}
             for i in range(specific_search_space['num2d'][-1] + specific_search_space['num1d'][-1]):
@@ -288,16 +303,17 @@ def main():
             specific_search_space['DOA'] = {'search_space_1d': search_space_1d}
             search_space = specific_search_space
             writer.dump(search_space, search_space_path)
+        else:
+            writer.dump(search_space, search_space_path)
 
         current_number = len(results)
         for number in range(current_number, train_config.n_samples):
             while True:
-                model_configs = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
-
+                model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
                 # 학습
                 start = time.time()
                 outputs = train_and_eval(
-                    train_config, model_configs, 
+                    train_config, model_config, 
                     input_shape, 
                     trainset, valset, evaluator, mirrored_strategy)
                 if isinstance(outputs, bool) and outputs == True:
@@ -314,7 +330,7 @@ def main():
                 outputs['objective_score'] = get_objective_score(outputs)
 
             # 결과 저장
-            results.append({'config': model_configs, 'perf': outputs})
+            results.append({'config': model_config, 'perf': outputs})
             writer.dump(results, current_result_path)
         
         
@@ -333,6 +349,7 @@ def main():
             tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold, table))
             # search space 줄이기
             check, search_space, results = narrow_search_space(search_space, table, tmp_table, results, train_config, writer)
+
 
 if __name__=='__main__':
     main()
