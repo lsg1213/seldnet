@@ -119,8 +119,13 @@ def train_and_eval(train_config,
                    valset: tf.data.Dataset,
                    evaluator,
                    mirrored_strategy):
+    while True:
+        try:
+            selected_lr, weights = get_batch_size(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
+            break
+        except ValueError:
+            pass
 
-    selected_lr, weights = get_batch_size(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
     performances = {}
     try:
         optimizer = tf.keras.optimizers.Adam(selected_lr)
@@ -288,16 +293,12 @@ def main():
                 print(k, ':', v)
             raise ValueError('train config doesn\'t match')
 
-    writer.index = 0
     while True:
         writer.index += 1 # 차수
 
         current_result_path = os.path.join(writer.result_path, f'result_{writer.index}.json')
         results = []
 
-        # resume
-        if os.path.exists(current_result_path):
-            results = writer.load(current_result_path)
         # search space
         search_space_path = os.path.join(writer.result_path, f'search_space_{writer.index}.json')
         if os.path.exists(search_space_path):
@@ -318,8 +319,11 @@ def main():
         else:
             writer.dump(search_space, search_space_path)
 
-        current_number = len(results)
-        for number in range(current_number, train_config.n_samples):
+        while len(results) < train_config.n_samples:
+            # resume
+            if os.path.exists(current_result_path):
+                results = writer.load(current_result_path)
+            current_number = len(results)
             while True:
                 model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
                 # 학습
@@ -342,6 +346,10 @@ def main():
                 outputs['objective_score'] = get_objective_score(outputs)
 
             # 결과 저장
+            if os.path.exists(current_result_path):
+                results = writer.load(current_result_path)
+                if len(results) >= train_config.n_samples:
+                    break
             results.append({'config': model_config, 'perf': outputs})
             writer.dump(results, current_result_path)
         
