@@ -109,6 +109,9 @@ def get_batch_size(train_config, input_shape, model_config, mirrored_strategy, t
                         loss_weights=[1, 1000])
         history = model.fit(trainset, validation_data=valset).history
         val_losses.append(history['val_loss'])
+        if len(various_lr) == 2:
+            if various_lr[0] < various_lr[1]:
+                break
     return various_lr[tf.concat(val_losses, 0).numpy().argmin()], weights
 
 
