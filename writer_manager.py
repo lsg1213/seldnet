@@ -6,10 +6,10 @@ from glob import glob
 
 
 class Writer:
-    def __init__(self, train_config):
+    def __init__(self, train_config, result_folder='result'):
         self.abspath = '.'
         self.train_config = train_config
-        self.result_path = self.make_dir(os.path.join('result', self.train_config.name))
+        self.result_path = self.make_dir(os.path.join(result_folder, self.train_config.name))
         self.train_config_path = os.path.join(self.result_path, 'train_config.json')
         self.index = self.get_index()
         if self.train_config.new:

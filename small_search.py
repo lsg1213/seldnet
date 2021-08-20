@@ -18,74 +18,149 @@ from model_analyze import analyzer, narrow_search_space
 from writer_manager import Writer
 from modules import stages_1d, stages_2d
 import models
-
-
-args = argparse.ArgumentParser()
-
-# args.add_argument('--name', type=str, required=True,
-#                   help='name must be {name}_{divided index} ex) 2021_1')
-args.add_argument('--dataset_path', type=str, 
-                  default='/root/datasets/DCASE2021/feat_label')
-args.add_argument('--n_samples', type=int, default=500)
-args.add_argument('--min_samples', type=int, default=32)
-args.add_argument('--verbose', action='store_true')
-args.add_argument('--threshold', type=float, default=0.05)
-
-args.add_argument('--batch_size', type=int, default=256)
-args.add_argument('--n_repeat', type=int, default=5)
-args.add_argument('--epoch', type=int, default=12)
-args.add_argument('--lr', type=float, default=1e-3)
-args.add_argument('--n_classes', type=int, default=12)
-args.add_argument('--gpus', type=str, default='-1')
-args.add_argument('--config', action='store_true', help='if true, reuse config')
-args.add_argument('--new', action='store_true')
-args.add_argument('--multi', action='store_true')
-args.add_argument('--score', action='store_true')
-
-train_config = args.parse_args()
+from search import get_dataset
 
 
 def get_search_space(target):
-    search_space = {}
     blocks = [i for i in target.keys() if i.startswith('BLOCK') and not '_ARGS' in i]
+    num1d, num2d = 0, 0
     for block in blocks:
-        search_space[block] = {}
         if target[block] in stages_1d:
-            search_space[block]['search_space_1d'] = {}
+            num1d += 1
+        elif target[block] in stages_2d:
+            num2d += 1
+    search_space = {'num1d': [num1d],'num2d': [num2d]}
+    for block in blocks + ['SED', 'DOA']:
+        search_space[block] = {}
+        search_space[block]['search_space_1d'] = {}
+        search_space[block]['search_space_2d'] = {}
+
+        if target[block] in stages_1d:
             args = {}
             for k, v in target[block+'_ARGS'].items():
                 if k == 'multiplier' or k == 'ff_multiplier':
                     v = float(v)
                 if isinstance(v, float):
-                    v = sorted(list(set([v * i / 20 for i in range(1, 11)])))
+                    if 'dropout_rate' in k:
+                        v = sorted(list(set([v * i / 20 for i in range(10, 21)])))
+                    else:
+                        v = sorted(list(set([v * i / 20 for i in range(10, 21) if v * i / 20 != 0])))
                 elif isinstance(v, int):
-                    v = sorted(list(set([int(v * i / 20) for i in range(1, 11)])))
+                    v = sorted(list(set([int(v * i / 20) for i in range(10, 21) if int(v * i / 20) != 0])))
                 elif k == 'pos_encoding':
                     v = [None, 'basic', 'rff']
+                elif isinstance(v, (str, list)):
+                    v = [v]
                 args[k] = v
             search_space[block]['search_space_1d'][target[block]] = args
         elif target[block] in stages_2d:
-            search_space[block]['search_space_2d'] = {}
             args = {}
             for k,v in target[block+'_ARGS'].items():
                 if k == 'connect0':
-                    v = [0,1]
+                    v = [[0], [1]]
                 elif k == 'connect1':
                     v = list(map(list, product(range(2), range(2))))
                 elif k == 'connect2':
                     v = list(map(list, product(range(2), range(2), range(2))))
                 elif k == 'strides':
                     v = [(1, 1), (1, 2), (1, 3)]
+                if isinstance(v, float):
+                    if 'dropout_rate' in k:
+                        v = sorted(list(set([v * i / 20 for i in range(10, 21)])))
+                    else:
+                        v = sorted(list(set([v * i / 20 for i in range(10, 21) if v * i / 20 != 0])))
+                elif isinstance(v, int):
+                    if k == 'filter1':
+                        v = sorted(list(set([int(v * i / 20) for i in range(10, 21) if int(v * i / 20) != 0])))
+                    else:
+                        v = sorted(list(set([int(v * i / 20) for i in range(10, 21)])))
                 args[k] = v
             search_space[block]['search_space_2d'][target[block]] = args
+        elif target[block] == 'identity_block':
+            continue
         else:
             raise ValueError()
+
     return search_space
 
 
-def main():
+def train_and_eval(train_config,
+                   model_config: dict,
+                   input_shape,
+                   trainset: tf.data.Dataset,
+                   valset: tf.data.Dataset,
+                   evaluator,
+                   mirrored_strategy):
+    performances = {}
+    try:
+        optimizer = tf.keras.optimizers.Adam(train_config.lr)
+        if train_config.multi:
+            with mirrored_strategy.scope():
+                model = models.conv_temporal(input_shape, model_config)
+                model.compile(optimizer=optimizer,
+                            loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
+                                    'doa_out': tf.keras.losses.MSE},
+                            loss_weights=[1, 1000])
+        else:
+            model = models.conv_temporal(input_shape, model_config)
+            model.compile(optimizer=optimizer,
+                        loss={'sed_out': tf.keras.losses.BinaryCrossentropy(),
+                                'doa_out': tf.keras.losses.MSE},
+                        loss_weights=[1, 1000])
+
+        model.summary()
+    except tf.errors.ResourceExhaustedError:
+        print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
+        if not os.path.exists('error_models'):
+            os.makedirs('error_models')
+        configs = []
+        if os.path.exists(os.path.join('error_models', 'error_model.json')):
+            with open(os.path.join('error_models', 'error_model.json'), 'r') as f:
+                configs = json.load(f)
+        else:
+            configs = [model_config]
+        with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
+            json.dump(model_config, f, indent=4)
+        return True
+    history = model.fit(trainset, validation_data=valset, epochs=train_config.epoch).history
+
+    if len(performances) == 0:
+        for k, v in history.items():
+            performances[k] = v
+    else:
+        for k, v in history.items():
+            performances[k] += v
+
+    evaluator.reset_states()
+    for x, y in valset:
+        y_p = model(x, training=False)
+        evaluator.update_states(y, y_p)
+    scores = evaluator.result()
+    scores = {
+        'val_error_rate': scores[0].numpy().tolist(),
+        'val_f1score': scores[1].numpy().tolist(),
+        'val_der': scores[2].numpy().tolist(),
+        'val_derf': scores[3].numpy().tolist(),
+        'val_seld_score': calculate_seld_score(scores).numpy().tolist(),
+    }
+    if 'val_error_rate' in performances.keys():
+        for k, v in scores.items():
+            performances[k].append(v)
+    else:
+        for k, v in scores.items():
+            performances[k] = [v]
+
+    performances.update({
+        'flops': get_flops(model),
+        'size': get_model_size(model)
+    })
+    del model, optimizer, history
+    return performances
+
+
+def main(train_config):
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
-    writer = Writer(train_config)
+    writer = Writer(train_config, result_folder='small_result')
     mirrored_strategy = tf.distribute.MirroredStrategy()
     if train_config.config:
         train_config = vars(train_config)
@@ -111,15 +186,11 @@ def main():
         name = os.path.splitext(name)[0]
 
     input_shape = [300, 64, 7]
-    with open('model_config/SS5.json', 'r') as f:
-        target = json.load(f)
+    target = writer.load(os.path.join('model_config', train_config.target if os.path.splitext(train_config.target)[-1] == '.json' else train_config.target + '.json'))
 
     if 'first_pool_size' in target.keys():
         del target['first_pool_size']
-
-    
-    
-    
+ 
     # datasets
     if train_config.multi:
         with mirrored_strategy.scope():
@@ -166,14 +237,21 @@ def main():
             if os.path.exists(current_result_path):
                 results = writer.load(current_result_path)
             current_number = len(results)
+            count = 0
             while True:
-                model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
-                # 학습
-                start = time.time()
-                outputs = train_and_eval(
-                    train_config, model_config, 
-                    input_shape, 
-                    trainset, valset, evaluator, mirrored_strategy)
+                try:
+                    model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
+                    # 학습
+                    start = time.time()
+                    outputs = train_and_eval(
+                        train_config, model_config, 
+                        input_shape, 
+                        trainset, valset, evaluator, mirrored_strategy)
+                except ValueError:
+                    count += 1
+                    if count % 100000 == 0:
+                        print(f'config count: {count}')
+                    continue
                 if isinstance(outputs, bool) and outputs == True:
                     print('Model config error! RETRY')
                     continue
@@ -214,5 +292,29 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    args = argparse.ArgumentParser()
+
+    args.add_argument('--name', type=str, required=True,
+                    help='name must be {name}_{divided index} ex) 2021_1')
+    args.add_argument('--target', type=str, default='SS5')
+    args.add_argument('--dataset_path', type=str, 
+                    default='/root/datasets/DCASE2021/feat_label')
+    args.add_argument('--n_samples', type=int, default=200)
+    args.add_argument('--min_samples', type=int, default=16)
+    args.add_argument('--verbose', action='store_true')
+    args.add_argument('--threshold', type=float, default=0.05)
+
+    args.add_argument('--batch_size', type=int, default=256)
+    args.add_argument('--n_repeat', type=int, default=5)
+    args.add_argument('--epoch', type=int, default=12)
+    args.add_argument('--lr', type=float, default=1e-3)
+    args.add_argument('--n_classes', type=int, default=12)
+    args.add_argument('--gpus', type=str, default='-1')
+    args.add_argument('--config', action='store_true', help='if true, reuse config')
+    args.add_argument('--new', action='store_true')
+    args.add_argument('--multi', action='store_true')
+    args.add_argument('--score', action='store_true')
+
+    train_config = args.parse_args()
+    main(train_config)
 

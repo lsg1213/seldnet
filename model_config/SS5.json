@@ -3,7 +3,7 @@
     "first_pool_size": [5, 2],
     "BLOCK0": "mother_stage",
     "BLOCK0_ARGS": {
-	"depth": 2,
+	"mother_depth": 2,
 	"filters0": 0,
 	"filters1": 96,
 	"filters2": 0,
@@ -30,13 +30,13 @@
     "BLOCK1": "simple_dense_stage",
     "BLOCK1_ARGS": {
 	"depth": 1,
-	"units": 192,
+	"dense_units": 192,
 	"dense_activation": "relu",
 	"dropout_rate": 0.0
     },
     "BLOCK2": "conformer_encoder_stage",
     "BLOCK2_ARGS": {
-	"depth": 2,
+	"conformer_depth": 2,
 	"key_dim": 24,
 	"n_head": 4,
 	"kernel_size": 24,
@@ -45,7 +45,7 @@
     },
     "SED": "conformer_encoder_stage",
     "SED_ARGS": {
-	"depth": 1,
+	"conformer_depth": 1,
 	"key_dim": 48,
 	"n_head": 4,
 	"kernel_size": 8,
@@ -55,6 +55,6 @@
     "DOA": "bidirectional_GRU_stage",
     "DOA_ARGS": {
 	"depth": 2,
-	"units": 128
+	"gru_units": 128
     }
 }
