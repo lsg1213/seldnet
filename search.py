@@ -89,7 +89,8 @@ search_space_1d = {
 
 def get_batch_size(train_config, input_shape, model_config, mirrored_strategy, trainset, valset):
     various_lr = [train_config.lr / i ** 2 for i in range(1, 5)]
-    model = models.conv_temporal(input_shape, model_config) 
+    model = models.conv_temporal(input_shape, model_config)
+
     weights = model.get_weights()
     val_losses = []
     for lr in various_lr:
@@ -139,6 +140,8 @@ def train_and_eval(train_config,
             with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
                 json.dump(model_config, f, indent=4)
             return True
+        except ValueError:
+            continue
 
     performances = {}
     try:
