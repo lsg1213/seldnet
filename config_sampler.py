@@ -66,14 +66,14 @@ def get_block_config(search_space, model_config, stage_name='BLOCK'):
     num2d = choice(search_space['num2d'])
     num1d = choice(search_space['num1d'])
     max_block_num = max(search_space['num1d']) + max(search_space['num2d'])
-    identities = range(num1d + num2d, max_block_num)
     
     i = 0
-    while i < num2d + num1d:
+    idx_1d, idx_2d = 0, 0
+    while idx_1d + idx_2d < num1d + num2d:
         name = stage_name + str(i)
         sp = copy.deepcopy(search_space[name])
         
-        if num2d != 0:
+        if idx_2d < num2d:
             if len(sp['search_space_2d']) == 0:
                 num2d -= 1
                 continue
@@ -94,19 +94,21 @@ def get_block_config(search_space, model_config, stage_name='BLOCK'):
                 for k, v in sp['search_space_2d'][model_config[name]].items():
                     v = choice(v)
                     model_arg_config[k] = v
-            num2d -= 1
-        else:
+            idx_2d += 1
+        elif idx_1d < num1d:
+            import pdb; pdb.set_trace()
             model_config[name] = choice([i for i in sp['search_space_1d'].keys() if i != 'num'])
 
             model_arg_config = {}
             for k, v in sp['search_space_1d'][model_config[name]].items():
                 v = choice(v)
                 model_arg_config[k] = v
-            num1d -= 1
+            idx_1d += 1
 
         model_config[name + '_ARGS'] = model_arg_config
         i += 1
     
+    identities = range(num1d + num2d, max_block_num)
     for i in identities:
         model_config[f'BLOCK{i}'] = 'identity_block'
         model_config[f'BLOCK{i}_ARGS'] = {}

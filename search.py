@@ -340,6 +340,8 @@ def main():
             # resume
             if os.path.exists(current_result_path):
                 results = writer.load(current_result_path)
+                if len(results) >= train_config.n_samples:
+                    break
             current_number = len(results)
             while True:
                 model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
