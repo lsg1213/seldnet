@@ -68,11 +68,15 @@ def get_block_config(search_space, model_config, stage_name='BLOCK'):
     max_block_num = max(search_space['num1d']) + max(search_space['num2d'])
     identities = range(num1d + num2d, max_block_num)
     
-    for i in range(num2d + num1d):
+    i = 0
+    while i < num2d + num1d:
         name = stage_name + str(i)
         sp = copy.deepcopy(search_space[name])
         
         if num2d != 0:
+            if len(sp['search_space_2d']) == 0:
+                num2d -= 1
+                continue
             model_config[name] = choice([i for i in sp['search_space_2d'].keys() if i != 'num'])
 
             model_arg_config = {}
@@ -101,6 +105,7 @@ def get_block_config(search_space, model_config, stage_name='BLOCK'):
             num1d -= 1
 
         model_config[name + '_ARGS'] = model_arg_config
+        i += 1
     
     for i in identities:
         model_config[f'BLOCK{i}'] = 'identity_block'
