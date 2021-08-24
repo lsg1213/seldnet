@@ -287,7 +287,7 @@ def main():
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
     writer = Writer(train_config)
-    mirrored_strategy = tf.distribute.MirroredStrategy()
+    mirrored_strategy = tf.distribute.MirroredStrategy(cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
     if train_config.config:
         train_config = vars(train_config)
         train_config.update(writer.load(os.path.join(os.path.join('result', train_config['name']), 'train_config.json')))
