@@ -255,6 +255,34 @@ def get_dataset(config, mode: str = 'train'):
     return dataset
 
 
+def search_space_filter(target, unit):
+    target = target.split('.')
+    try:
+        unit = json.loads(unit)
+    except:
+        pass
+
+    def _search_space_filter(results):
+        if len(target) == 1:
+            v = results['config'].get(target[0])
+            if v is None:
+                raise ValueError()
+        elif len(target) == 2:
+            v = results['config'].get(target[0])
+            if v is None:
+                raise ValueError()
+            v = v.get(target[1])
+            if v is None:
+                target[1] = '_'.join(target[1].split('_')[1:])
+                v = v.get(target[1])
+                if v is None:
+                    raise ValueError()
+        if type(v) != type(unit):
+            raise TypeError('value and unit must be same type')
+        return v != unit
+    return _search_space_filter
+
+
 def main():
     train_config = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = train_config.gpus
@@ -372,7 +400,20 @@ def main():
             results.append({'config': model_config, 'perf': outputs})
             writer.dump(results, current_result_path)
         
-        
+        # 그동안 모든 결과 부르기
+        results = []
+        results = [writer.load(res_path) for res_path in sorted(glob(os.path.join(writer.result_path, 'result_*')))]
+        results = [x for y in results for x in y]
+
+        # 그동안 삭제했던 부분 부르기
+        removed_space = [writer.load(removed_path) for removed_path in sorted(glob(os.path.join(writer.result_path, 'removed_space_*')))]
+        removed_space = [x for y in removed_space for x in y]
+
+        for remove in removed_space:
+            target = remove['versus'].split(':')[0]
+            unit = remove['result'].split(' ')[0]
+            results = list(filter(search_space_filter(target, unit), results))
+
         # 분석
         check = True
         table = analyzer(search_space, results, train_config)
