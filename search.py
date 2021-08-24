@@ -45,7 +45,7 @@ input_shape = [300, 64, 7]
 
 
 '''            SEARCH SPACES           '''
-block_2d_num = [1, 2]
+block_2d_num = [1, 2, 3]
 block_1d_num = [0, 1, 2]
 search_space_2d = {
     'mother_stage':
@@ -64,25 +64,25 @@ search_space_2d = {
 }
 search_space_1d = {
     'bidirectional_GRU_stage':
-        {'depth': [1, 2],
+        {'gru_depth': [1, 2],
         'gru_units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
     'transformer_encoder_stage':
-        {'depth': [1, 2],
-        'n_head': [1, 2, 4],
+        {'transformer_depth': [1, 2],
+        'transformer_n_head': [1, 2, 4],
         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32],
         'ff_multiplier': [0.25, 0.5, 1, 2],
         'transformer_kernel_size': [1, 3, 5]},
     'simple_dense_stage':
-        {'depth': [1, 2],
+        {'dense_depth': [1, 2],
             'dense_units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 256],
             'dense_activation': ['relu'],
             'dropout_rate': [0., 0.2, 0.5]},
     'conformer_encoder_stage':
-        {'conformer_depth': [1, ],
+        {'conformer_depth': [1],
         'key_dim': [2, 3, 4, 6, 8, 12, 16],
         'n_head': [1, 2, 4],
-        'conformer_kernel_size': [4, 6, 8, 12, 16],
-        'multiplier': [1, 2, 4],
+        'conformer_kernel_size': [4, 6, 8, 12, 16, 24, 32],
+        'multiplier': [1, 2, 3],
         'pos_encoding': [None, 'basic', 'rff']},
 }
 

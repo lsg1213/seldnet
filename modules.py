@@ -68,7 +68,7 @@ def bidirectional_GRU_stage(model_config: dict):
     non-essential configs
         dropout_rate: (default=0.)
     '''
-    depth = model_config['depth']
+    depth = model_config['gru_depth']
     units = model_config['gru_units']
     model_config = copy.deepcopy(model_config)
     model_config['gru_units'] = [units] * depth
@@ -87,7 +87,7 @@ def simple_dense_stage(model_config: dict):
         dropout_rate: (default=0.)
         kernel_regularizer: (default={'l1': 0., 'l2': 0.})
     '''
-    depth = model_config['depth']
+    depth = model_config['dense_depth']
     units = model_config['dense_units']
     model_config = copy.deepcopy(model_config)
     model_config['dense_units'] = [units] * depth
@@ -109,7 +109,7 @@ def transformer_encoder_stage(model_config: dict):
         activation: (default=relu)
         dropout_rate: (default=0.1)
     '''
-    depth = model_config['depth']
+    depth = model_config['transformer_depth']
 
     def stage(x):
         x = force_1d_inputs()(x)
@@ -306,7 +306,7 @@ def simple_dense_block(model_config: dict):
 
 
 def transformer_encoder_block(model_config: dict):
-    n_head = model_config['n_head']
+    n_head = model_config['transformer_n_head']
     key_dim = model_config['key_dim']
     ff_multiplier = model_config['ff_multiplier'] # default to 4 
     kernel_size = model_config['transformer_kernel_size'] # default to 1
