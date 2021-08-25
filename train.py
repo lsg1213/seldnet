@@ -297,7 +297,12 @@ def main(config):
         import argparse
         model_config = get_config(argparse.Namespace(n_classes=12), search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
         model_config['n_classes'] = n_classes
-        model = getattr(models, config.model)(input_shape, model_config)
+        while True:
+            try:
+                model = getattr(models, config.model)(input_shape, model_config)
+            except ValueError:
+                pass
+            break
         config.lr, weight = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)
         model.set_weights(weight)
         del weight
