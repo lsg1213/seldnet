@@ -375,13 +375,16 @@ def main():
                 model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
                 # 학습
                 start = time.time()
-                outputs = train_and_eval(
-                    train_config, model_config, 
-                    input_shape, 
-                    trainset, valset, evaluator, mirrored_strategy)
-                if isinstance(outputs, bool) and outputs == True:
-                    print('Model config error! RETRY')
-                    continue
+                try:
+                    outputs = train_and_eval(
+                        train_config, model_config, 
+                        input_shape, 
+                        trainset, valset, evaluator, mirrored_strategy)
+                    if isinstance(outputs, bool) and outputs == True:
+                        print('Model config error! RETRY')
+                        continue
+                except ValueError:
+                    pass
                 break
 
             outputs['time'] = time.time() - start
