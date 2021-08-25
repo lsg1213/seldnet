@@ -338,7 +338,7 @@ def main(config):
         evaluate_fn = generate_evaluate_fn(
             test_xs, test_ys, evaluator, config.batch*4, writer=writer)
 
-        train_slosses, train_dlosses, val_slosses, val_dlosses, test_score, val_score = [], [], [], []
+        train_slosses, train_dlosses, val_slosses, val_dlosses, test_score, val_score = [], [], [], [], [], []
         for epoch in range(config.epoch):
             # if epoch == swa_start_epoch:
             #     tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
