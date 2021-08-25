@@ -19,6 +19,7 @@ def get_param(known=None):
     args.add_argument('--model_config', type=str, default='SS5')
     args.add_argument('--output_path', type=str, default='./output')
     args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/metadata_dev/')
+    args.add_argument('--multi', action='store_true')
     
 
     # training
@@ -26,7 +27,7 @@ def get_param(known=None):
     args.add_argument('--decay', type=float, default=0.5)
     args.add_argument('--batch', type=int, default=256)
     args.add_argument('--agc', type=bool, default=False)
-    args.add_argument('--epoch', type=int, default=150)
+    args.add_argument('--epoch', type=int, default=100)
     args.add_argument('--loss_weight', type=str, default='1,1000')
     args.add_argument('--lr_patience', type=int, default=80, 
                       help='learning rate decay patience for plateau')
