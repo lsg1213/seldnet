@@ -133,6 +133,7 @@ def random_ups_and_downs(x, y):
     offsets_shape[-3] = offsets.shape[0]
     offsets = tf.reshape(offsets, offsets_shape)
     x = tf.concat([x[..., :4] + offsets, x[..., 4:]], axis=-1)
+
     return x, y
 
 
@@ -145,6 +146,7 @@ def get_dataset(config, mode: str = 'train'):
     if config.use_tfm and mode == 'train':
         sample_transforms = [
             random_ups_and_downs,
+            # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
             # lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
         ]
     else:
@@ -278,7 +280,7 @@ def main(config):
 
     origin_name = config.name
     # model load
-    for num in range(1, 50):
+    for num in range(1, 100):
         config.name = origin_name + f'_{num}'
         tensorboard_path = os.path.join('./tensorboard_log', config.name)
         if not os.path.exists(tensorboard_path):
@@ -296,8 +298,11 @@ def main(config):
         model_config = get_config(argparse.Namespace(n_classes=12), search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
         model_config['n_classes'] = n_classes
         model = getattr(models, config.model)(input_shape, model_config)
+        config.lr, weight = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)\
+        model.set_weights(weight)
+        del weight
         model.summary()
-        config.lr = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)
+
         model = apply_kernel_regularizer(model, kernel_regularizer)
 
         optimizer = tf.keras.optimizers.Adam(config.lr)
@@ -314,7 +319,7 @@ def main(config):
             doa_loss = getattr(losses, config.doa_loss)
 
         # stochastic weight averaging
-        # swa = SWA(model, swa_start_epoch, swa_freq)
+        swa = SWA(model, swa_start_epoch, swa_freq)
 
         if config.resume:
             _model_path = sorted(glob(model_path + '/*.hdf5'))
@@ -338,10 +343,10 @@ def main(config):
         evaluate_fn = generate_evaluate_fn(
             test_xs, test_ys, evaluator, config.batch*4, writer=writer)
 
-        train_slosses, train_dlosses, val_slosses, val_dlosses, test_score, val_score = [], [], [], [], [], []
+        train_slosses, train_dlosses, val_slosses, val_dlosses, train_scores, test_score, val_score = [], [], [], [], [], [], []
         for epoch in range(config.epoch):
-            # if epoch == swa_start_epoch:
-            #     tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
+            if epoch == swa_start_epoch:
+                tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
 
             if epoch % 10 == 0:
                 evaluate_fn(model, epoch)
@@ -356,7 +361,7 @@ def main(config):
             val_score.append(float(score))
             train_slosses.append(float(train_sloss))
             train_dlosses.append(float(train_dloss))
-            train_score.append(float(score))
+            train_scores.append(float(train_score))
 
             # swa.on_epoch_end(epoch)
 
