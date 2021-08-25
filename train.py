@@ -297,7 +297,7 @@ def main(config):
         model_config['n_classes'] = n_classes
         model = getattr(models, config.model)(input_shape, model_config)
         model.summary()
-        config.lr = get_learning_rate(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
+        config.lr = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)
         model = apply_kernel_regularizer(model, kernel_regularizer)
 
         optimizer = tf.keras.optimizers.Adam(config.lr)
@@ -338,7 +338,7 @@ def main(config):
         evaluate_fn = generate_evaluate_fn(
             test_xs, test_ys, evaluator, config.batch*4, writer=writer)
 
-        val_slosses, val_dlosses, test_score, val_score = [], [], [], []
+        train_slosses, train_dlosses, val_slosses, val_dlosses, test_score, val_score = [], [], [], []
         for epoch in range(config.epoch):
             # if epoch == swa_start_epoch:
             #     tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
