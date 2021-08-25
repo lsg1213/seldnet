@@ -87,7 +87,7 @@ search_space_1d = {
 }
 
 
-def get_batch_size(train_config, input_shape, model_config, mirrored_strategy, trainset, valset):
+def get_learning_rate(train_config, input_shape, model_config, mirrored_strategy, trainset, valset):
     various_lr = [train_config.lr / i ** 2 for i in range(1, 5)]
     model = models.conv_temporal(input_shape, model_config)
 
@@ -125,7 +125,7 @@ def train_and_eval(train_config,
                    mirrored_strategy):
     while True:
         try:
-            selected_lr, weights = get_batch_size(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
+            selected_lr, weights = get_learning_rate(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
             break
         except tf.errors.ResourceExhaustedError:
             print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
@@ -233,7 +233,7 @@ def get_dataset(config, mode: str = 'train'):
     if mode == 'train':
         sample_transforms = [
             random_ups_and_downs,
-            lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
+            # lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
         ]
         batch_transforms = [foa_intensity_vec_aug]
     else:

@@ -18,7 +18,7 @@ from swa import SWA
 from transforms import *
 from utils import adaptive_clip_grad, AdaBelief, apply_kernel_regularizer
 
-from search import search_space_1d, search_space_2d, block_1d_num, block_2d_num
+from search import search_space_1d, search_space_2d, block_1d_num, block_2d_num, get_learning_rate
 
 
 
@@ -145,8 +145,7 @@ def get_dataset(config, mode: str = 'train'):
     if config.use_tfm and mode == 'train':
         sample_transforms = [
             random_ups_and_downs,
-            # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
-            lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
+            # lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
         ]
     else:
         sample_transforms = []
@@ -239,7 +238,7 @@ def main(config):
     swa_freq = 2
     kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
 
-    
+    mirrored_strategy = tf.distribute.MirroredStrategy(cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
 
     # data load
     trainset = get_dataset(config, 'train')
@@ -279,7 +278,7 @@ def main(config):
 
     origin_name = config.name
     # model load
-    for num in range(32, 48):
+    for num in range(1, 50):
         config.name = origin_name + f'_{num}'
         tensorboard_path = os.path.join('./tensorboard_log', config.name)
         if not os.path.exists(tensorboard_path):
@@ -298,7 +297,7 @@ def main(config):
         model_config['n_classes'] = n_classes
         model = getattr(models, config.model)(input_shape, model_config)
         model.summary()
-
+        config.lr = get_learning_rate(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
         model = apply_kernel_regularizer(model, kernel_regularizer)
 
         optimizer = tf.keras.optimizers.Adam(config.lr)
@@ -315,7 +314,7 @@ def main(config):
             doa_loss = getattr(losses, config.doa_loss)
 
         # stochastic weight averaging
-        swa = SWA(model, swa_start_epoch, swa_freq)
+        # swa = SWA(model, swa_start_epoch, swa_freq)
 
         if config.resume:
             _model_path = sorted(glob(model_path + '/*.hdf5'))
@@ -341,20 +340,23 @@ def main(config):
 
         val_slosses, val_dlosses, test_score, val_score = [], [], [], []
         for epoch in range(config.epoch):
-            if epoch == swa_start_epoch:
-                tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
+            # if epoch == swa_start_epoch:
+            #     tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
 
             if epoch % 10 == 0:
                 evaluate_fn(model, epoch)
 
             # train loop
-            train_iterloop(model, trainset, epoch, optimizer)
+            train_score, train_sloss, train_dloss = train_iterloop(model, trainset, epoch, optimizer)
             score, val_sloss, val_dloss = val_iterloop(model, valset, epoch)
             testscore, _, _ = test_iterloop(model, testset, epoch)
             test_score.append(float(testscore))
             val_slosses.append(float(val_sloss))
             val_dlosses.append(float(val_dloss))
             val_score.append(float(score))
+            train_slosses.append(float(train_sloss))
+            train_dlosses.append(float(train_dloss))
+            train_score.append(float(score))
 
             # swa.on_epoch_end(epoch)
 
@@ -390,7 +392,7 @@ def main(config):
             os.makedirs('sampling_result')
         import json
         with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
-            json.dump([model_config, val_slosses, val_dlosses, test_score, val_score], f, indent=4)
+            json.dump([model_config, train_slosses, train_dlosses, val_slosses, val_dlosses, test_score, val_score], f, indent=4)
 
         # tf.keras.models.save_model(
         #     model, 
