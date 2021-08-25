@@ -298,7 +298,7 @@ def main(config):
         model_config = get_config(argparse.Namespace(n_classes=12), search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
         model_config['n_classes'] = n_classes
         model = getattr(models, config.model)(input_shape, model_config)
-        config.lr, weight = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)\
+        config.lr, weight = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)
         model.set_weights(weight)
         del weight
         model.summary()
