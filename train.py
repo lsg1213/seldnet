@@ -298,7 +298,7 @@ def main(config):
         model_config = get_config(argparse.Namespace(n_classes=12), search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
         model_config['n_classes'] = n_classes
         model = getattr(models, config.model)(input_shape, model_config)
-        config.lr, weight = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)\
+        config.lr, weight = get_learning_rate(config, input_shape, model_config, mirrored_strategy, trainset, valset)
         model.set_weights(weight)
         del weight
         model.summary()
@@ -397,7 +397,7 @@ def main(config):
             os.makedirs('sampling_result')
         import json
         with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
-            json.dump([model_config, train_slosses, train_dlosses, val_slosses, val_dlosses, test_score, val_score], f, indent=4)
+            json.dump([model_config, train_slosses, train_dlosses, val_slosses, val_dlosses, train_score, test_score, val_score], f, indent=4)
 
         # tf.keras.models.save_model(
         #     model, 
