@@ -406,7 +406,7 @@ def main(config):
             os.makedirs('sampling_result')
         import json
         with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
-            json.dump([model_config, train_slosses, train_dlosses, val_slosses, val_dlosses, train_score, test_score, val_score], f, indent=4)
+            json.dump([model_config, train_slosses, train_dlosses, val_slosses, val_dlosses, train_scores, test_score, val_score], f, indent=4)
 
         # tf.keras.models.save_model(
         #     model, 
