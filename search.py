@@ -263,6 +263,7 @@ def search_space_filter(target, unit):
         pass
 
     def _search_space_filter(results):
+        aa = deepcopy(target)
         if len(target) == 1:
             v = results['config'].get(target[0])
             if v is None:
@@ -271,10 +272,16 @@ def search_space_filter(target, unit):
             v = results['config'].get(target[0])
             if v is None:
                 raise ValueError()
+            if target[1] == 'depth' and v.get(target[1]) is None:
+                if not target[1] in v.keys():
+                    target[1] = [i for i in v.keys() if 'depth' in i][0]
             v = v.get(target[1])
             if v is None:
-                target[1] = '_'.join(target[1].split('_')[1:])
-                v = v.get(target[1])
+                try:
+                    target[1] = '_'.join(target[1].split('_')[1:])
+                    v = v.get(target[1])
+                except:
+                    import pdb; pdb.set_trace()
                 if v is None:
                     raise ValueError()
         if type(v) != type(unit):
