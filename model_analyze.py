@@ -147,7 +147,7 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
     table = sorted(table, key=lambda x: x[0][0], reverse=True) # pvalue
 
     if len(table) == 0:
-        return False, search_space, results
+        return False, search_space, results, False
 
     best = table.pop()
     entire_table.remove(best)
