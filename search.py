@@ -180,7 +180,7 @@ def train_and_eval(train_config,
         with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
             json.dump(model_config, f, indent=4)
         return True
-    model.set_weights(weights)
+    # model.set_weights(weights)
     history = model.fit(trainset, validation_data=valset, epochs=train_config.epoch).history
 
     if len(performances) == 0:
