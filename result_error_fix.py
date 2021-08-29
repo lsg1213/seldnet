@@ -48,10 +48,10 @@ for result in results:
             v = result['config'][block + '_ARGS'].get(k)
             tmp = {}
             if not k in sp.keys():
-                if args != 'simple_dense_stage':
-                    newkey = '_'.join([args.split('_')[0],k])
+                if args in ('simple_dense_stage', 'bidirectional_GRU_stage'):
+                    newkey = args.split('_')[1] + '_' + k
                 else:
-                    newkey = 'dense_' + k
+                    newkey = '_'.join([args.split('_')[0],k])
                 for key in result['config'][block + '_ARGS'].keys(): # 순서 맞추려고 이렇게 함
                     if k != key:
                         tmp[key] = result['config'][block + '_ARGS'][key]
