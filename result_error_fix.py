@@ -2,7 +2,7 @@ import json
 from search import search_space_1d, search_space_2d
 
 
-with open('result/initial_score/result_1.json','r') as f:
+with open('result/loss/result_1.json','r') as f:
     results = json.load(f)
 
 for result in results:
@@ -41,6 +41,8 @@ for result in results:
         if args is None:
             raise ValueError('something wrong')
         search_space_1d.update(search_space_2d)
+        if args == 'identity_block':
+            continue
         sp = search_space_1d[args]
         for k in [i for i in result['config'][block + '_ARGS'].keys()]:
             v = result['config'][block + '_ARGS'].get(k)
@@ -58,5 +60,5 @@ for result in results:
 
                 result['config'][block + '_ARGS'] = tmp
                 
-with open('result/result_1.json','w') as f:
+with open('result/loss/result_1.json','w') as f:
     json.dump(results, f, indent=4)
