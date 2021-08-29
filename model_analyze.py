@@ -205,7 +205,7 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
         writer.dump(new, removed_case_path)
     else:
         writer.dump(removed_case, removed_case_path)
-    return check, search_space, results
+    return check, search_space, results, len(removed_case) == 0
 
 
 def is_1d(block):

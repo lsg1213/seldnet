@@ -13,7 +13,7 @@ from config_sampler import get_config
 from search_utils import postprocess_fn
 from model_flop import get_flops
 from model_size import get_model_size
-from model_analyze import analyzer, narrow_search_space
+from model_analyze import analyzer, narrow_search_space, table_filter
 from writer_manager import Writer
 import models
 
@@ -124,6 +124,7 @@ def train_and_eval(train_config,
                    evaluator,
                    mirrored_strategy):
     while True:
+        count = 0
         try:
             selected_lr, weights = get_learning_rate(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
             break
@@ -141,6 +142,9 @@ def train_and_eval(train_config,
                 json.dump(model_config, f, indent=4)
             return True
         except ValueError:
+            count += 1
+            if count % 10000 == 0:
+                print("iter:", count)
             continue
 
     performances = {}
@@ -414,7 +418,6 @@ def main():
         results = []
         results = [writer.load(res_path) for res_path in sorted(glob(os.path.join(writer.result_path, 'result_*')))]
         results = [x for y in results for x in y]
-
         # 그동안 삭제했던 부분 부르기
         removed_space = [writer.load(removed_path) for removed_path in sorted(glob(os.path.join(writer.result_path, 'removed_space_*')))]
         removed_space = [x for y in removed_space for x in y]
@@ -427,7 +430,7 @@ def main():
         # 분석
         check = True
         table = analyzer(search_space, results, train_config)
-        tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold and x[-2] != 'identity_block' and x[-1] != 'identity_block', table))
+        tmp_table = table_filter(table, train_config.threshold)
         if len(tmp_table) == 0:
             print('MODEL SEARCH COMPLETE!!')
             return
@@ -435,10 +438,13 @@ def main():
         while check:
             table = analyzer(search_space, results, train_config)
             table = list(filter(lambda x: x[-2] != 'identity_block' and x[-1] != 'identity_block', table))
-            # 단순히 좁힐 게 있는 지 탐지
-            tmp_table = list(filter(lambda x: x[0][0] <= train_config.threshold, table))
+
+            tmp_table = table_filter(table, train_config.threshold)
             # search space 줄이기
-            check, search_space, results = narrow_search_space(search_space, table, tmp_table, results, train_config, writer)
+            check, search_space, results, end = narrow_search_space(search_space, table, tmp_table, results, train_config, writer)
+            if end:
+                print('MODEL SEARCH END!!')
+                return
 
 
 if __name__=='__main__':
