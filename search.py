@@ -81,7 +81,7 @@ search_space_1d = {
     'conformer_encoder_stage':
         {'conformer_depth': [1],
         'key_dim': [2, 3, 4, 6, 8, 12, 16],
-        'n_head': [1, 2, 4],
+        'conformer_n_head': [1, 2, 4],
         'conformer_kernel_size': [4, 6, 8, 12, 16, 24, 32],
         'multiplier': [1, 2, 3],
         'pos_encoding': [None, 'basic', 'rff']},

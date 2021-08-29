@@ -339,7 +339,7 @@ def transformer_encoder_block(model_config: dict):
 def conformer_encoder_block(model_config: dict):
     # mandatory parameters
     key_dim = model_config.get('key_dim', 36)
-    n_head = model_config.get('n_head', 4)
+    n_head = model_config.get('conformer_n_head', 4)
     kernel_size = model_config.get('conformer_kernel_size', 32) # 32 
     activation = model_config.get('activation', 'swish')
     dropout_rate = model_config.get('dropout_rate', 0.1)
