@@ -65,8 +65,8 @@ search_space_2d = {
 }
 search_space_1d = {
     'bidirectional_GRU_stage':
-        {'gru_depth': [1, 2],
-        'gru_units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
+        {'GRU_depth': [1, 2],
+        'GRU_units': [16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
     'transformer_encoder_stage':
         {'transformer_depth': [1, 2],
         'transformer_n_head': [1, 2, 4],

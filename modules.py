@@ -68,10 +68,10 @@ def bidirectional_GRU_stage(model_config: dict):
     non-essential configs
         dropout_rate: (default=0.)
     '''
-    depth = model_config['gru_depth']
-    units = model_config['gru_units']
+    depth = model_config['GRU_depth']
+    units = model_config['GRU_units']
     model_config = copy.deepcopy(model_config)
-    model_config['gru_units'] = [units] * depth
+    model_config['GRU_units'] = [units] * depth
 
     return bidirectional_GRU_block(model_config)
 
@@ -258,7 +258,7 @@ def mother_block(model_config: dict):
 """            BLOCKS WITH 1D OUTPUTS            """
 def bidirectional_GRU_block(model_config: dict):
     # mandatory parameters
-    units_per_layer = model_config['gru_units']
+    units_per_layer = model_config['GRU_units']
 
     dropout_rate = model_config.get('dropout_rate', 0.)
 
