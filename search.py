@@ -124,29 +124,30 @@ def train_and_eval(train_config,
                    valset: tf.data.Dataset,
                    evaluator,
                    mirrored_strategy):
-    while True:
-        count = 0
-        try:
-            selected_lr, weights = get_learning_rate(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
-            break
-        except tf.errors.ResourceExhaustedError:
-            print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
-            if not os.path.exists('error_models'):
-                os.makedirs('error_models')
-            configs = []
-            if os.path.exists(os.path.join('error_models', 'error_model.json')):
-                with open(os.path.join('error_models', 'error_model.json'), 'r') as f:
-                    configs = json.load(f)
-            else:
-                configs = [model_config]
-            with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
-                json.dump(model_config, f, indent=4)
-            return True
-        except ValueError:
-            count += 1
-            if count % 10000 == 0:
-                print("iter:", count)
-            continue
+    # while True:
+    #     count = 0
+    #     try:
+    #         selected_lr, weights = get_learning_rate(train_config, input_shape, model_config, mirrored_strategy, trainset, valset)
+    #         break
+    #     except tf.errors.ResourceExhaustedError:
+    #         print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
+    #         if not os.path.exists('error_models'):
+    #             os.makedirs('error_models')
+    #         configs = []
+    #         if os.path.exists(os.path.join('error_models', 'error_model.json')):
+    #             with open(os.path.join('error_models', 'error_model.json'), 'r') as f:
+    #                 configs = json.load(f)
+    #         else:
+    #             configs = [model_config]
+    #         with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
+    #             json.dump(model_config, f, indent=4)
+    #         return True
+    #     except ValueError:
+    #         count += 1
+    #         if count % 10000 == 0:
+    #             print("iter:", count)
+    #         continue
+    selected_lr = train_config.lr
 
     performances = {}
     try:
