@@ -203,6 +203,7 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
             if v not in new:
                 new.append(v)
         writer.dump(new, removed_case_path)
+        removed_case = new
     else:
         writer.dump(removed_case, removed_case_path)
     return check, search_space, results, len(removed_case) == 0
