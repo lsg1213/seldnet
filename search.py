@@ -39,6 +39,7 @@ args.add_argument('--config', action='store_true', help='if true, reuse config')
 args.add_argument('--new', action='store_true')
 args.add_argument('--multi', action='store_true')
 args.add_argument('--score', action='store_true')
+args.add_argument('--loss', action='store_true')
 
 
 input_shape = [300, 64, 7]
@@ -236,7 +237,7 @@ def get_dataset(config, mode: str = 'train'):
                              mode=mode, n_freq_bins=64)
     if mode == 'train':
         sample_transforms = [
-            random_ups_and_downs,
+            # random_ups_and_downs,
             # lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
         ]
         batch_transforms = [foa_intensity_vec_aug]
@@ -403,6 +404,8 @@ def main():
             # eval
             if train_config.score:
                 outputs['objective_score'] = np.array(outputs['val_seld_score'])[-1]
+            elif train_config.loss:
+                outputs['objective_score'] = np.array(outputs['loss'])[-1]
             else:
                 outputs['objective_score'] = get_objective_score(outputs)
 
