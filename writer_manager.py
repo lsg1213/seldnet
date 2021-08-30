@@ -3,6 +3,7 @@ import json
 import os
 from copy import deepcopy
 from glob import glob
+from time import sleep
 
 
 class Writer:
@@ -42,8 +43,19 @@ class Writer:
             json.dump(content, f, indent=4)
     
     def load(self, path):
-        with open(path, 'r') as f:
-            return json.load(f)
+        count = 0
+        while True:
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            except json.decoder.JSONDecodeError:
+                sleep(1)
+                count += 1
+            finally:
+                if count == 10:
+                    with open(path, 'r') as f:
+                        return json.load(f)
+
 
     def get_index(self):
         previous_results = sorted(glob(os.path.join(self.result_path, f'result_*')))
