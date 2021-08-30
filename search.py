@@ -406,7 +406,7 @@ def main():
             if train_config.score:
                 outputs['objective_score'] = np.array(outputs['val_seld_score'])[-1]
             elif train_config.loss:
-                outputs['objective_score'] = np.array(outputs['loss'])[-1]
+                outputs['objective_score'] = np.array(outputs['val_loss'])[-1]
             else:
                 outputs['objective_score'] = get_objective_score(outputs)
 
