@@ -2,7 +2,7 @@ import json
 from search import search_space_1d, search_space_2d
 
 
-with open('result/loss/result_1.json','r') as f:
+with open('result/initial_score/result_7.json','r') as f:
     results = json.load(f)
 
 for result in results:
@@ -49,6 +49,9 @@ for result in results:
             tmp = {}
             if not k in sp.keys():
                 if args in ('simple_dense_stage', 'bidirectional_GRU_stage'):
+                    if 'gru' in k:
+                        k.replace('gru','GRU')
+                        
                     newkey = args.split('_')[1] + '_' + k
                 else:
                     newkey = '_'.join([args.split('_')[0],k])
@@ -60,5 +63,5 @@ for result in results:
 
                 result['config'][block + '_ARGS'] = tmp
                 
-with open('result/loss/result_1.json','w') as f:
+with open('result/initial_score/result_7.json','w') as f:
     json.dump(results, f, indent=4)
