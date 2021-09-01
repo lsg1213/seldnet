@@ -168,7 +168,7 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
     while idx < max_idx:
         case = same_name_results[idx]
         idx += 1
-        if case[0][1] <= best[0][1] and (case[0][3] <= best[0][3] or case[0][2] <= best[0][2]): # min과 median 비교
+        if case[0][1] <= best[0][1]: # min과 median 비교
             print(best[-2], best[-1])
             removed_case.append({
                 'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
@@ -180,7 +180,7 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
             results = result_filtering(results, best[-2], best[-1])
             check = True
             break
-        elif case[0][1] > best[0][1] and (case[0][3] > best[0][3] or case[0][2] > best[0][2]):
+        elif case[0][1] > best[0][1]:
             print(case[-2], case[-1])
             removed_case.append({
                 'versus': f'{best[-2]}: {best[-1]} vs {case[-1]}',
