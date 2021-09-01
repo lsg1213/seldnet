@@ -428,7 +428,7 @@ def main():
 
         for remove in removed_space:
             target = remove['versus'].split(':')[0]
-            unit = remove['result'].split(' ')[0]
+            unit = ' '.join(remove['result'].split(' ')[:-2])
             results = list(filter(search_space_filter(target, unit), results))
 
         # 분석
