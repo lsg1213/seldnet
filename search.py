@@ -355,6 +355,8 @@ def main():
         writer.index += 1 # 차수
 
         current_result_path = os.path.join(writer.result_path, f'result_{writer.index}.json')
+        if not os.path.exists(current_result_path):
+            writer.dump([], current_result_path)
         results = []
 
         # search space
