@@ -280,7 +280,7 @@ def main(config):
 
     origin_name = config.name
     # model load
-    for num in range(1, 100):
+    for num in range(73, 100):
         config.name = origin_name + f'_{num}'
         tensorboard_path = os.path.join('./tensorboard_log', config.name)
         if not os.path.exists(tensorboard_path):

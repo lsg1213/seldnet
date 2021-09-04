@@ -122,11 +122,12 @@ def result_filtering(results, name, unit):
 
 def table_filter(table, search_space, threshold=0.05):
     values = {}
-    for block in [block for block in search_space.keys() if 'BLOCK' in block]:
-        values[block] = [v for v in search_space[block].values()]
+    blocks = [block for block in search_space.keys() if 'BLOCK' in block]
+    for block in blocks:
+        values[block] = [v for v in search_space[block].values() if len(v) != 0]
 
     def _table_filter(x):
-        if len(values[x[-2]]) == 1:
+        if x[-2] in blocks and len(values[x[-2]]) == 1:
             return False
         if x[0][0] > threshold:
             return False
