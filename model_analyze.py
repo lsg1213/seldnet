@@ -120,8 +120,14 @@ def result_filtering(results, name, unit):
     return results
 
 
-def table_filter(table, threshold=0.05):
+def table_filter(table, search_space, threshold=0.05):
+    values = {}
+    for block in [block for block in search_space.keys() if 'BLOCK' in block]:
+        values[block] = [v for v in search_space[block].values()]
+
     def _table_filter(x):
+        if len(values[x[-2]]) == 1:
+            return False
         if x[0][0] > threshold:
             return False
         if x[-2] == 'identity_block' or x[-1] == 'identity_block':
@@ -143,7 +149,7 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
     check = False
 
     # stage 개수는 빼고 분석
-    table = table_filter(table, train_config.threshold)
+    table = table_filter(table, search_space, train_config.threshold)
     table = sorted(table, key=lambda x: x[0][0], reverse=True) # pvalue
 
     if len(table) == 0:

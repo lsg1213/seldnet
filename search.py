@@ -436,7 +436,7 @@ def main():
         # 분석
         check = True
         table = analyzer(search_space, results, train_config)
-        tmp_table = table_filter(table, train_config.threshold)
+        tmp_table = table_filter(table, search_space, train_config.threshold)
         if len(tmp_table) == 0:
             print('MODEL SEARCH COMPLETE!!')
             return
@@ -445,7 +445,7 @@ def main():
             table = analyzer(search_space, results, train_config)
             table = list(filter(lambda x: x[-2] != 'identity_block' and x[-1] != 'identity_block', table))
 
-            tmp_table = table_filter(table, train_config.threshold)
+            tmp_table = table_filter(table, search_space, train_config.threshold)
             # search space 줄이기
             check, search_space, results, end = narrow_search_space(search_space, table, tmp_table, results, train_config, writer)
             if end:
