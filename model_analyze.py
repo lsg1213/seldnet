@@ -154,13 +154,12 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
     table = sorted(table, key=lambda x: x[0][0], reverse=True) # pvalue
 
     if len(table) == 0:
-        return False, search_space, results, False
+        return False, search_space, results, False, table
 
     best = table.pop()
     entire_table.remove(best)
     same_name_results = [i for i in entire_table if i[-2] == best[-2]]
     
-    low, high = 0, 0 # best의 score가 제일 높은 지 낮은 지 판단, high는 score보다 best가 높은 것 개수, low는 score보다 best가 낮은 것 개수
     '''
     table
     1. pvalue 순서대로 sort(descending)
@@ -213,7 +212,7 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
         removed_case = new
     else:
         writer.dump(removed_case, removed_case_path)
-    return check, search_space, results, len(removed_case) == 0
+    return check, search_space, results, len(removed_case) == 0 and len(table) == 0, table
 
 
 def is_1d(block):
@@ -291,7 +290,6 @@ def extract_feats_from_pairs(pairs):
 
 
 def analyzer(search_space, results, train_config):
-    min_samples = train_config.min_samples
     keyword = 'objective_score'
     interests = ['SED', 'DOA'] + [f'BLOCK{i}' for i in range(search_space['num1d'][-1] + search_space['num2d'][-1])]
 
@@ -302,7 +300,6 @@ def analyzer(search_space, results, train_config):
                 common_features[k] = v
                 break
     # common_features = extract_feats_from_pairs(results)
-    max_block_num = len([k for k in common_features.keys() if k.startswith('BLOCK') and len(k) == 6])
     block_num = []
 
     table = {feat: [] for feat in common_features}
@@ -377,7 +374,6 @@ def analyzer(search_space, results, train_config):
         pvalues = get_ks_test_values(
             unique_values, perfs, min_samples=train_config.min_samples, 
             verbose=train_config.verbose)
-        n_samples = [len(p) for p in perfs]
 
         for i in range(len(pvalues)):
             if len(pvalues[i]) == 0:

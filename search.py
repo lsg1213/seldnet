@@ -171,14 +171,13 @@ def train_and_eval(train_config,
         print('!!!!!!!!!!!!!!!model error occurs!!!!!!!!!!!!!!!')
         if not os.path.exists('error_models'):
             os.makedirs('error_models')
-        configs = []
         if os.path.exists(os.path.join('error_models', 'error_model.json')):
             with open(os.path.join('error_models', 'error_model.json'), 'r') as f:
                 configs = json.load(f)
         else:
-            configs = [model_config]
+            configs = []
         with open(os.path.join('error_models', 'error_model.json'), 'w') as f:
-            json.dump(model_config, f, indent=4)
+            json.dump(configs + model_config, f, indent=4)
         return True
     # model.set_weights(weights)
     history = model.fit(trainset, validation_data=valset, epochs=train_config.epoch).history
@@ -269,7 +268,6 @@ def search_space_filter(target, unit):
         pass
 
     def _search_space_filter(results):
-        aa = deepcopy(target)
         if len(target) == 1:
             v = results['config'].get(target[0])
             if v is None:
@@ -281,13 +279,18 @@ def search_space_filter(target, unit):
             if target[1] == 'depth' and v.get(target[1]) is None:
                 if not target[1] in v.keys():
                     target[1] = [i for i in v.keys() if 'depth' in i][0]
+            elif target[1] == 'GRU_units' and v.get(target[1]) is None:
+                tmp = {}
+                for k in results['config'].get(target[0]):
+                    if k != 'gru_units':
+                        tmp[k] = results['config'].get(target[0])[k]
+                    else:
+                        tmp['GRU_units'] = results['config'].get(target[0])[k]
+                results['config'][target[0]] = tmp
             v = v.get(target[1])
             if v is None:
-                try:
-                    target[1] = '_'.join(target[1].split('_')[1:])
-                    v = v.get(target[1])
-                except:
-                    import pdb; pdb.set_trace()
+                # target[1] = '_'.join(target[1].split('_')[1:])
+                v = results['config'].get(target[0]).get(target[1])
                 if v is None:
                     raise ValueError()
         if type(v) != type(unit):
@@ -385,7 +388,6 @@ def main():
                 results = writer.load(current_result_path)
                 if len(results) >= train_config.n_samples:
                     break
-            current_number = len(results)
             while True:
                 model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
                 # 학습
@@ -447,11 +449,13 @@ def main():
 
             tmp_table = table_filter(table, search_space, train_config.threshold)
             # search space 줄이기
-            check, search_space, results, end = narrow_search_space(search_space, table, tmp_table, results, train_config, writer)
-            if end:
-                print('MODEL SEARCH END!!')
-                return
-
+            while True:
+                check, search_space, results, end, res_table = narrow_search_space(search_space, table, tmp_table, results, train_config, writer)
+                if not check and len(res_table) != 0:
+                    tmp_table = res_table
+                else:
+                    check = len(res_table) != 0
+                    break
 
 if __name__=='__main__':
     main()
