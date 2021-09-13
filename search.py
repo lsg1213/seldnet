@@ -149,7 +149,8 @@ def train_and_eval(train_config,
     #             print("iter:", count)
     #         continue
     selected_lr = train_config.lr
-    if get_model_size(models.conv_temporal(input_shape, model_config)) > train_config.size:
+    model_size = get_model_size(models.conv_temporal(input_shape, model_config))
+    if model_size > train_config.size:
         raise ValueError('model size is big')
 
     performances = {}
@@ -214,7 +215,7 @@ def train_and_eval(train_config,
 
     performances.update({
         'flops': get_flops(model),
-        'size': get_model_size(model)
+        'size': model_size
     })
     del model, optimizer, history
     return performances
