@@ -149,7 +149,7 @@ def train_and_eval(train_config,
     #             print("iter:", count)
     #         continue
     selected_lr = train_config.lr
-    if get_model_size(models.conv_temporal(input_shape, model_config)) > train_config:
+    if get_model_size(models.conv_temporal(input_shape, model_config)) > train_config.size:
         raise ValueError('model size is big')
 
     performances = {}
