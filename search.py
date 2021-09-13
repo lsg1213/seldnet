@@ -41,6 +41,7 @@ args.add_argument('--multi', action='store_true')
 args.add_argument('--score', action='store_true')
 args.add_argument('--loss', action='store_true')
 
+args.add_argument('--size', type=int, default=10_000_000)
 
 input_shape = [300, 64, 7]
 
@@ -148,6 +149,8 @@ def train_and_eval(train_config,
     #             print("iter:", count)
     #         continue
     selected_lr = train_config.lr
+    if get_model_size(models.conv_temporal(input_shape, model_config)) > train_config:
+        raise ValueError('model size is big')
 
     performances = {}
     try:
@@ -401,7 +404,7 @@ def main():
                         print('Model config error! RETRY')
                         continue
                 except ValueError:
-                    pass
+                    continue
                 break
 
             outputs['time'] = time.time() - start
