@@ -1,9 +1,11 @@
-import numpy as np
+import argparse
 import os
-import tensorflow as tf
-import tensorflow_addons as tfa
 import time
 from collections import OrderedDict
+
+import numpy as np
+import tensorflow as tf
+import tensorflow_addons as tfa
 from glob import glob
 from numpy import inf
 from tensorboardX import SummaryWriter
@@ -17,6 +19,35 @@ from metrics import *
 from swa import SWA
 from transforms import *
 from utils import adaptive_clip_grad, apply_kernel_regularizer
+from params import get_param
+
+args = argparse.ArgumentParser()
+    
+args.add_argument('--name', type=str, required=True)
+
+args.add_argument('--gpus', type=str, default='-1')
+args.add_argument('--resume', action='store_true')    
+args.add_argument('--abspath', type=str, default='/root/datasets')
+args.add_argument('--output_path', type=str, default='./output')
+args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/metadata_dev/')
+
+
+# training
+args.add_argument('--lr', type=float, default=0.001)
+args.add_argument('--decay', type=float, default=0.5)
+args.add_argument('--batch', type=int, default=256)
+args.add_argument('--agc', type=bool, default=False)
+args.add_argument('--epoch', type=int, default=100)
+args.add_argument('--lr_patience', type=int, default=80, 
+                    help='learning rate decay patience for plateau')
+args.add_argument('--patience', type=int, default=100, 
+                    help='early stop patience')
+args.add_argument('--use_acs', type=bool, default=True)
+args.add_argument('--use_tfm', type=bool, default=True)
+args.add_argument('--use_tdm', action='store_true')
+args.add_argument('--loop_time', type=int, default=5, 
+                    help='times of train dataset iter for an epoch')
+args.add_argument('--lad_doa_thresh', type=int, default=20)
 
 
 def bn_conv_block(inp, chn, kernel_size=3, dilation=1, pad=1, stride=1, test=False):
@@ -128,27 +159,23 @@ def get_model(input_shape):
 
 def get_accdoa_labels(accdoa_in, nb_classes):
     x, y, z = accdoa_in[:, :, :nb_classes], accdoa_in[:, :, nb_classes:2*nb_classes], accdoa_in[:, :, 2*nb_classes:]
-    sed = np.sqrt(x**2 + y**2 + z**2) > 0.5
-      
+    sed = tf.cast(tf.sqrt(x**2 + y**2 + z**2) > 0.5, tf.float32)
     return sed, accdoa_in
 
 
 def generate_trainstep(criterion, config):
     # These are statistics from the train dataset
-    train_samples = tf.convert_to_tensor(
-        [[58193, 32794, 29801, 21478, 14822, 
-        9174, 66527,  6740,  9342,  6498, 
-        22218, 49758]],
-        dtype=tf.float32)
-    cls_weights = tf.reduce_mean(train_samples) / train_samples
+    # train_samples = tf.convert_to_tensor(
+    #     [[58193, 32794, 29801, 21478, 14822, 
+    #     9174, 66527,  6740,  9342,  6498, 
+    #     22218, 49758]],
+    #     dtype=tf.float32)
+    # cls_weights = tf.reduce_mean(train_samples) / train_samples
     @tf.function
     def trainstep(model, x, y, optimizer):
         with tf.GradientTape() as tape:
             y_p = model(x, training=True)
-            sed, doa = y
-            sed_pred, doa_pred = y_p
-
-            loss = criterion(y, y_p)
+            loss = criterion(y[1], y_p)
 
             # regularizer
             # loss += tf.add_n([l.losses[0] for l in model.layers
@@ -168,15 +195,15 @@ def generate_teststep(criterion):
     @tf.function
     def teststep(model, x, y, optimizer=None):
         y_p = model(x, training=False)
-        loss = criterion(y_p, y)
+        loss = criterion(y[1], y_p)
         return y_p, loss
     return teststep
 
 
 def generate_iterloop(criterion, evaluator, writer, 
-                      mode, loss_weights=None, config=None):
+                      mode, config=None):
     if mode == 'train':
-        step = generate_trainstep(criterion, loss_weights, config)
+        step = generate_trainstep(criterion, config)
     else:
         step = generate_teststep(criterion)
 
@@ -187,7 +214,7 @@ def generate_iterloop(criterion, evaluator, writer,
         with tqdm(dataset) as pbar:
             for x, y in pbar:
                 preds, loss = step(model, x, y, optimizer)
-                y, pred = get_accdoa_labels(preds, 12)
+                y, preds = y, get_accdoa_labels(preds, preds.shape[-1] // 3)
                 
                 evaluator.update_states(y, preds)
                 metric_values = evaluator.result()
@@ -212,10 +239,8 @@ def generate_iterloop(criterion, evaluator, writer,
                           metric_values[2].numpy(), epoch)
         writer.add_scalar(f'{mode}/{mode}_DoaErrorRateF', 
                           metric_values[3].numpy(), epoch)
-        writer.add_scalar(f'{mode}/{mode}_sedLoss', 
-                          ssloss.result().numpy(), epoch)
-        writer.add_scalar(f'{mode}/{mode}_doaLoss', 
-                          ddloss.result().numpy(), epoch)
+        writer.add_scalar(f'{mode}/{mode}_Loss', 
+                          losses.result().numpy(), epoch)
         writer.add_scalar(f'{mode}/{mode}_seldScore', 
                           seld_score.numpy(), epoch)
 
@@ -231,7 +256,7 @@ def random_ups_and_downs(x, y):
     offsets_shape = [1] * len(x.shape)
     offsets_shape[-3] = offsets.shape[0]
     offsets = tf.reshape(offsets, offsets_shape)
-    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], axis=-1)
+    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], -1)
     return x, y
 
 
@@ -261,7 +286,7 @@ def get_dataset(config, mode: str = 'train'):
         sample_transforms=sample_transforms,
         loop_time=config.loop_time
     )
-    return dataset
+    return dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
 
 def ensemble_outputs(model, xs: list, 
@@ -272,11 +297,12 @@ def ensemble_outputs(model, xs: list,
 
         sed, doa = [], []
         for i in range(int(np.ceil(windows.shape[0]/batch_size))):
-            s, d = model(windows[i*batch_size:(i+1)*batch_size], training=False)
+            y_p = model(windows[i*batch_size:(i+1)*batch_size], training=False)
+            s, d = get_accdoa_labels(y_p, y_p.shape[-1] // 3)
             sed.append(s)
             doa.append(d)
-        sed = tf.concat(sed, axis=0)
-        doa = tf.concat(doa, axis=0)
+        sed = tf.concat(sed, 0)
+        doa = tf.concat(doa, 0)
 
         # windows to seq
         total_counts = tf.signal.overlap_and_add(
@@ -329,8 +355,8 @@ def generate_evaluate_fn(test_xs, test_ys, evaluator, batch_size=256,
     return evaluate_fn
 
 
-def main():
-    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+def main(config):
+    os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     swa_start_epoch = 80
     swa_freq = 2
     n_classes = 12
@@ -359,25 +385,13 @@ def main():
     test_ys = list(map(
         lambda x: split_total_labels_to_sed_doa(None, x)[-1], test_ys))
 
-    x, y = [(x, y) for x, y in valset.take(1)][0]
-    input_shape = x.shape
-    sed_shape, doa_shape = tf.shape(y[0]), tf.shape(y[1])
-
+    x, _ = [(x, y) for x, y in valset.take(1)][0]
+    input_shape = x.shape[1:]
     model = get_model(input_shape)
     model.summary()
 
     optimizer = tf.keras.optimizers.Adam(config.lr)
-    if config.sed_loss == 'BCE':
-        sed_loss = tf.keras.backend.binary_crossentropy
-    else:
-        sed_loss = losses.focal_loss
-    # fix doa_loss to MMSE_with_cls_weights (because of class weights)
-    # doa_loss = losses.MMSE_with_cls_weights
-    try:
-        doa_loss = getattr(tf.keras.losses, config.doa_loss)
-    except:
-        doa_loss = getattr(losses, config.doa_loss)
-
+    criterion = tf.keras.losses.MSE
 
     # stochastic weight averaging
     swa = SWA(model, swa_start_epoch, swa_freq)
@@ -396,7 +410,7 @@ def main():
 
     train_iterloop = generate_iterloop(
         criterion, evaluator, writer, 'train', 
-        loss_weights=list(map(int, config.loss_weight.split(','))), config=config)
+        config=config)
     val_iterloop = generate_iterloop(
         criterion, evaluator, writer, 'val')
     test_iterloop = generate_iterloop(
@@ -456,7 +470,5 @@ def main():
 
 
 if __name__=='__main__':
-    # main()
-    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-    model = get_model([300,64,7])
-    model.summary()
+    main(args.parse_args())
+    
