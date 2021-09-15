@@ -153,6 +153,7 @@ def get_model(input_shape):
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten())(x)
     x = tf.keras.layers.Dense(36)(x)
     x = tf.keras.layers.UpSampling1D(3)(x)
+    x = tf.keras.layers.Activation('tanh')(x)
 
     return tf.keras.Model(inputs=inp, outputs=x)
 
