@@ -137,6 +137,8 @@ def DPRNN(inp, hidden_size, output_size, dropout=0, num_layers=1, bidirectional=
     return output # (B, dim1, dim2, output_size)
 
 
+# https://github.com/sony/ai-research-code/blob/596d4ba79737de3bcf4f0f8bd934195c90c957c7/d3net/music-source-separation/model.py#L60
+# https://github.com/ShiZiqiang/dual-path-RNNs-DPRNNs-based-speech-separation/blob/master/models.py
 def get_model(input_shape):
     inp = tf.keras.layers.Input(shape = input_shape)
     x = d3_block(inp, 4, 16, 2)
