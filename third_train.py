@@ -100,7 +100,7 @@ def resnet(inp, block, layers, zero_init_residual=False, groups=1, width_per_gro
     return x
 
 
-def conv_block(inp, out_channel, pool_type='avg'):
+def conv_block(inp, out_channel, pool_type='avg', pool_size=(2,2)):
     x = tf.keras.layers.Conv2D(out_channel, kernel_size=(3,3), padding='same', use_bias=False)(inp)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.ReLU()(x)
@@ -109,18 +109,18 @@ def conv_block(inp, out_channel, pool_type='avg'):
     x = tf.keras.layers.ReLU()(x)
 
     if pool_type == 'avg':
-        x = tf.keras.layers.AveragePooling2D()(x)
+        x = tf.keras.layers.AveragePooling2D(pool_size)(x)
     elif pool_type == 'max':
-        x = tf.keras.layers.MaxPooling2D()(x)
+        x = tf.keras.layers.MaxPooling2D(pool_size)(x)
     elif pool_type == 'avg+max':
-        x1 = tf.keras.layers.AveragePooling2D()(x)
-        x2 = tf.keras.layers.MaxPooling2D()(x)
+        x1 = tf.keras.layers.AveragePooling2D(pool_size)(x)
+        x2 = tf.keras.layers.MaxPooling2D(pool_size)(x)
         x = x1 + x2
     else:
         raise Exception('Wrong pool_type')
     return x
 
-
+# https://github.com/qiuqiangkong/audioset_tagging_cnn/tree/master/pytorch
 def get_model(input_shape):
     inp = tf.keras.layers.Input(shape = input_shape)
     x = tf.keras.layers.BatchNormalization(-2)(inp) # mel 기준으로 bn
@@ -129,13 +129,14 @@ def get_model(input_shape):
     x = resnet(x, block=resnet_block, layers=[2, 2, 2, 2], zero_init_residual=True)
     x = tf.keras.layers.AveragePooling2D()(x)
     x = tf.keras.layers.Dropout(0.2)(x)
+    # x = conv_block(x, 2048, pool_size=(1, 1))
+
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten())(x)
 
     x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(256, return_sequences=True))(x)
-    x = tf.keras.layers.Permute((2,1))(x)
-    x = tf.keras.layers.Conv1D(60, 1, padding='same')(x)
-    x = tf.keras.layers.Permute((2,1))(x)
-    x = tf.keras.layers.Dense(36, activation='tanh')(x)
+    x = tf.keras.layers.Conv1D(60, 1, use_bias=False, data_format='channels_first')(x)
+    x = tf.keras.layers.Dense(36)(x)
+    x = tf.keras.layers.Activation('tanh')(x)
     return tf.keras.Model(inputs=inp, outputs=x)
 
 
@@ -453,4 +454,10 @@ def main(config):
 
 if __name__=='__main__':
     main(args.parse_args())
-        
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    # input_shape = [300, 64, 70]
+    # model = get_model(input_shape)
+    # model.summary()
+    # from model_flop import get_flops
+    # print(get_flops(model))
+    
