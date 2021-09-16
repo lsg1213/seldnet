@@ -474,4 +474,8 @@ def main(config):
 
 if __name__=='__main__':
     main(args.parse_args())
-    
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    # model = get_model([300, 64, 7])
+    # from model_flop import get_flops
+    # model.summary()
+    # print(get_flops(model))

@@ -131,7 +131,7 @@ def random_ups_and_downs(x, y):
     offsets_shape = [1] * len(x.shape)
     offsets_shape[-3] = offsets.shape[0]
     offsets = tf.reshape(offsets, offsets_shape)
-    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], axis=-1)
+    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], -1)
     return x, y
 
 
@@ -175,8 +175,8 @@ def ensemble_outputs(model, xs: list,
             s, d = model(windows[i*batch_size:(i+1)*batch_size], training=False)
             sed.append(s)
             doa.append(d)
-        sed = tf.concat(sed, axis=0)
-        doa = tf.concat(doa, axis=0)
+        sed = tf.concat(sed, 0)
+        doa = tf.concat(doa, 0)
 
         # windows to seq
         total_counts = tf.signal.overlap_and_add(
