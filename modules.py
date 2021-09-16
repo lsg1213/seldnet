@@ -1,6 +1,7 @@
 import copy
 import tensorflow as tf
 from tensorflow.keras.layers import *
+import tensorflow_addons as tfa
 from layers import *
 from utils import safe_tuple
 
@@ -10,7 +11,8 @@ stages_1d = ['bidirectional_GRU_stage',
              'simple_dense_stage',
              'conformer_encoder_stage']
 
-stages_2d = ['mother_stage']
+stages_2d = ['mother_stage',
+             'DPRNN_stage']
 
 
 """
@@ -44,6 +46,53 @@ def simple_conv_block(model_config: dict):
             x = Dropout(dropout_rate)(x)
         return x
     return conv_block
+
+
+def DPRNN_stage(model_config: dict):
+    depth = model_config['DPRNN_depth']
+
+    def stage(x):
+        for _ in range(depth):
+            x = DPRNN_block(model_config)(x)
+        return x
+    return stage
+
+
+def single_RNN_block(inp, units, dropout=0., bidirectional=False, rnn='GRU'):
+    RNN = getattr(tf.keras.layers, rnn)(units, dropout=dropout, return_sequences=True)
+    if bidirectional:
+        x = tf.keras.layers.Bidirectional(RNN)(inp)
+    else:
+        x = RNN(inp)
+    x = tf.keras.layers.Dense(inp.shape[-1])(x)
+    return x
+
+
+def DPRNN_block(model_config: dict):
+    units = model_config['DPRNN_units']
+    bidirectional = model_config['DPRNN_bidirectional']
+    rnn = model_config['DPRNN_rnn']
+    dropout = model_config.get('DPRNN_dropout', 0.)
+
+    def block(x):
+        output = x
+
+        dim1, dim2, N = x.shape[1:]
+        row_input = tf.keras.layers.Permute([2, 1, 3])(x) # B, dim2, dim1, N
+        row_input = tf.reshape(row_input, [-1, dim1, N])
+        row_output = single_RNN_block(row_input, units, dropout=dropout, bidirectional=bidirectional, rnn=rnn)
+        row_output = tf.reshape(row_output, [-1,dim2,dim1,N])
+        row_output = tf.keras.layers.Permute([2, 1, 3])(row_output)
+        row_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(row_output)
+        
+        col_input = tf.reshape(x, [-1, dim2, N])
+        col_output = single_RNN_block(col_input, units, dropout=dropout, bidirectional=bidirectional, rnn=rnn)
+        col_output = tf.reshape(col_output, [-1,dim1,dim2,N])
+        col_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(col_output)
+
+        output += row_output + col_output
+        return output # (B, dim1, dim2, output_size)
+    return block
 
 
 def mother_stage(model_config: dict):

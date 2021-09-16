@@ -29,6 +29,23 @@ class ModulesTest(tf.test.TestCase):
                         exp_input_shape,
                         exp_output_shape)
 
+    def test_DPRNN_stage(self):
+        model_config = {
+            'DPRNN_depth': 2,
+            'DPRNN_units': 128,
+            'DPRNN_bidirectional': True,
+            'DPRNN_rnn': 'GRU',
+            'DPRNN_dropout': 0.
+        }
+
+        exp_input_shape = 32, 32, 32, 3
+        exp_output_shape = 32, 32, 32, 128
+        import pdb; pdb.set_trace()
+        self.block_test(DPRNN_stage, 
+                        model_config, 
+                        exp_input_shape,
+                        exp_output_shape)
+
     def test_bidirectional_GRU_stage(self):
         model_config = {
             'depth': 3,
