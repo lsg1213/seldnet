@@ -40,6 +40,7 @@ args.add_argument('--new', action='store_true')
 args.add_argument('--multi', action='store_true')
 args.add_argument('--score', action='store_true')
 args.add_argument('--loss', action='store_true')
+args.add_argument('--accdoa', type=bool, default=True)
 
 args.add_argument('--size', type=int, default=10_000_000)
 
@@ -63,6 +64,12 @@ search_space_2d = {
         'connect2': [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1],
                     [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]],
         'strides': [(1, 1), (1, 2), (1, 3)]},
+    'DPRNN_stage':
+        {'DPRNN_depth': [1, 2],
+        'DPRNN_units': [16, 32, 64, 96, 128],
+        'DPRNN_bidirectional': [True, False],
+        'DPRNN_rnn': ['RNN', 'GRU', 'LSTM'],
+        }
 }
 search_space_1d = {
     'bidirectional_GRU_stage':
@@ -186,6 +193,10 @@ def random_ups_and_downs(x, y):
     return x, y
 
 
+def delete_sed_label(x, y):
+    return x, y[1]
+
+
 def get_dataset(config, mode: str = 'train'):
     path = config.dataset_path
     x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
@@ -201,6 +212,8 @@ def get_dataset(config, mode: str = 'train'):
         sample_transforms = []
         batch_transforms = []
     batch_transforms.append(split_total_labels_to_sed_doa)
+    if config.accdoa and mode == 'train':
+        batch_transforms.append(delete_sed_label)
 
     dataset = seldnet_data_to_dataloader(
         x, y,
