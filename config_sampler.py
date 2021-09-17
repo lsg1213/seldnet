@@ -157,7 +157,7 @@ def get_old_block_config(search_space, model_config, stage_name='BLOCK'):
                             v = [i for i in v if i > 0]
                         v = choice(v)
                         model_arg_config[k] = v
-                    check = mother_stage_constraint(search_space, name, model_arg_config)
+                    check = mother_stage_constraint(search_space, stage_name, model_arg_config)
             else:
                 for k, v in sp['search_space_2d'][model_config[name]].items():
                     v = choice(v)

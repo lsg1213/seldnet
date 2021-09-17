@@ -53,7 +53,7 @@ block_2d_num = [1, 2, 3]
 block_1d_num = [0, 1, 2]
 search_space_2d = {
     'mother_stage':
-        {'depth': [1, 2, 3],
+        {'mother_depth': [1, 2, 3],
          'filters0': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
                       3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
          'filters1': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
@@ -71,24 +71,24 @@ search_space_2d = {
 }
 search_space_1d = {
     'bidirectional_GRU_stage':
-        {'depth': [1, 2, 3],
-         'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
+        {'GRU_depth': [1, 2, 3],
+         'GRU_units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256]}, 
     'transformer_encoder_stage':
-        {'depth': [1, 2, 3],
-         'n_head': [1, 2, 4, 8, 16],
-         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
+        {'transformer_depth': [1, 2, 3],
+         'transformer_n_head': [1, 2, 4, 8, 16],
+         'transformer_key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
          'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
-         'kernel_size': [1, 3, 5]},
+         'transformer_kernel_size': [1, 3, 5]},
     'simple_dense_stage':
-        {'depth': [1, 2, 3],
-         'units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+        {'dense_depth': [1, 2, 3],
+         'dense_units': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
          'dense_activation': ['relu'],
          'dropout_rate': [0., 0.2, 0.5]},
     'conformer_encoder_stage':
-        {'depth': [1, 2, 3],
-         'key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-         'n_head': [1, 2, 4, 8, 16],
-         'kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
+        {'conformer_depth': [1, 2, 3],
+         'conformer_key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
+         'conformer_n_head': [1, 2, 4, 8, 16],
+         'conformer_kernel_size': [4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256],
          'multiplier': [1, 2, 4],
          'pos_encoding': [None, 'basic', 'rff']},
 }
@@ -103,8 +103,11 @@ def train_and_eval(train_config,
                    mirrored_strategy):
     selected_lr = train_config.lr
     model_size = get_model_size(models.conv_temporal(input_shape, model_config))
-    if model_size > train_config.size:
-        raise ValueError('model size is big')
+    model_flop = get_flops(models.conv_temporal(input_shape, model_config))
+    if model_flop > train_config.max_flops or model_flop < train_config.min_flops:
+        raise ValueError('model flops out of range')
+    # if model_size > train_config.size:
+    #     raise ValueError('model size is big')
 
     performances = {}
     try:
