@@ -22,7 +22,55 @@ from swa import SWA
 from transforms import *
 from utils import adaptive_clip_grad, AdaBelief, apply_kernel_regularizer
 
-from accdoa_search import search_space_1d, search_space_2d, block_1d_num, block_2d_num, get_learning_rate
+from accdoa_search import search_space_1d, search_space_2d, block_1d_num, block_2d_num
+
+
+args = argparse.ArgumentParser()
+    
+args.add_argument('--name', type=str, required=True)
+
+args.add_argument('--gpus', type=str, default='-1')
+args.add_argument('--resume', action='store_true')    
+args.add_argument('--abspath', type=str, default='/root/datasets')
+args.add_argument('--config_mode', type=str, default='')
+args.add_argument('--doa_loss', type=str, default='MSE', 
+                    choices=['MAE', 'MSE', 'MSLE', 'MMSE'])
+args.add_argument('--model', type=str, default='accdoa')
+args.add_argument('--model_config', type=str, default='SS5')
+args.add_argument('--output_path', type=str, default='./output')
+args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/metadata_dev/')
+args.add_argument('--multi', action='store_true')
+
+
+# training
+args.add_argument('--lr', type=float, default=0.001)
+args.add_argument('--decay', type=float, default=0.5)
+args.add_argument('--batch', type=int, default=256)
+args.add_argument('--agc', type=bool, default=False)
+args.add_argument('--epoch', type=int, default=100)
+args.add_argument('--loss_weight', type=str, default='1,1000')
+args.add_argument('--lr_patience', type=int, default=80, 
+                    help='learning rate decay patience for plateau')
+args.add_argument('--patience', type=int, default=100, 
+                    help='early stop patience')
+args.add_argument('--freq_mask_size', type=int, default=16)
+args.add_argument('--time_mask_size', type=int, default=24)
+args.add_argument('--tfm_period', type=int, default=100)
+args.add_argument('--use_acs', type=bool, default=True)
+args.add_argument('--use_tfm', type=bool, default=True)
+args.add_argument('--use_tdm', action='store_true')
+args.add_argument('--loop_time', type=int, default=5, 
+                    help='times of train dataset iter for an epoch')
+args.add_argument('--tdm_epoch', type=int, default=2,
+                    help='epochs of applying tdm augmentation. If 0, don\'t use it.')
+args.add_argument('--accdoa', type=bool, default=True)
+
+# metric
+args.add_argument('--lad_doa_thresh', type=int, default=20)
+args.add_argument('--sed_loss', type=str, default='BCE',
+                    choices=['BCE','FOCAL'])
+args.add_argument('--focal_g', type=float, default=2)
+args.add_argument('--focal_a', type=float, default=0.25)
 
 
 def get_accdoa_labels(accdoa_in, nb_classes):
@@ -109,7 +157,7 @@ def generate_iterloop(sed_loss, doa_loss, evaluator, writer,
             for x, y in pbar:
                 if accdoa:
                     preds, loss = step(model, x, y, optimizer)
-                    preds = get_accdoa_labels(preds, y[1].shape[-1])
+                    preds = get_accdoa_labels(preds, y[1].shape[-1] // 3)
                 else:
                     preds, sloss, dloss = step(model, x, y, optimizer)
 
@@ -271,15 +319,11 @@ def generate_evaluate_fn(test_xs, test_ys, evaluator, batch_size=256,
 
 
 def main(config):
-    config, model_config = config[0], config[1]
-
+    os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     # HyperParameters
     n_classes = 12
     swa_start_epoch = 80
     swa_freq = 2
-    kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
-
-    mirrored_strategy = tf.distribute.MirroredStrategy(cross_device_ops=tf.distribute.HierarchicalCopyAllReduce())
 
     # data load
     trainset = get_dataset(config, 'train')
@@ -327,6 +371,10 @@ def main(config):
         return
     # model load
     while num < max_num:
+        num = len(glob('sampling_result/*.json'))
+        if num == max_num:
+            print('done')
+            return
         config.name = origin_name + f'_{num}'
         with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
             json.dump([], f, indent=4)
@@ -352,7 +400,7 @@ def main(config):
             break
         model.summary()
 
-        model = apply_kernel_regularizer(model, kernel_regularizer)
+        # model = apply_kernel_regularizer(model, kernel_regularizer)
 
         optimizer = tf.keras.optimizers.Adam(config.lr)
         # optimizer = AdaBelief(config.lr)
@@ -389,60 +437,78 @@ def main(config):
             sed_loss, doa_loss, evaluator, writer, 'val')
         test_iterloop = generate_iterloop(
             sed_loss, doa_loss, evaluator, writer, 'test')
-        evaluate_fn = generate_evaluate_fn(
-            test_xs, test_ys, evaluator, config.batch*4, writer=writer)
+        # evaluate_fn = generate_evaluate_fn(
+        #     test_xs, test_ys, evaluator, config.batch*4, writer=writer)
 
         train_slosses, train_dlosses, val_slosses, val_dlosses, train_scores, test_score, val_score = [], [], [], [], [], [], []
-        for epoch in range(config.epoch):
-            if epoch == swa_start_epoch:
-                tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
+        if config.accdoa:
+            train_losses = []
+            val_losses = []
+        try:
+            for epoch in range(config.epoch):
+                if epoch == swa_start_epoch:
+                    tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
 
-            if epoch % 10 == 0:
-                evaluate_fn(model, epoch)
+                # if epoch % 10 == 0:
+                #     evaluate_fn(model, epoch)
 
-            # train loop
-            train_score, train_sloss, train_dloss = train_iterloop(model, trainset, epoch, optimizer)
-            score, val_sloss, val_dloss = val_iterloop(model, valset, epoch)
-            testscore, _, _ = test_iterloop(model, testset, epoch)
-            test_score.append(float(testscore))
-            val_slosses.append(float(val_sloss))
-            val_dlosses.append(float(val_dloss))
-            val_score.append(float(score))
-            train_slosses.append(float(train_sloss))
-            train_dlosses.append(float(train_dloss))
-            train_scores.append(float(train_score))
+                # train loop
+                if config.accdoa:
+                    train_score, train_loss = train_iterloop(model, trainset, epoch, optimizer)
+                    score, val_loss = val_iterloop(model, valset, epoch)
+                else:
+                    train_score, train_sloss, train_dloss = train_iterloop(model, trainset, epoch, optimizer)
+                    score, val_sloss, val_dloss = val_iterloop(model, valset, epoch)
+                testscore, _, = test_iterloop(model, testset, epoch)
+                test_score.append(float(testscore))
+                val_score.append(float(score))
+                if config.accdoa:
+                    train_losses.append(float(train_loss))
+                    val_losses.append(float(val_loss))
+                else:
+                    train_slosses.append(float(train_sloss))
+                    train_dlosses.append(float(train_dloss))
+                    val_slosses.append(float(val_sloss))
+                    val_dlosses.append(float(val_dloss))
+                train_scores.append(float(train_score))
 
-            swa.on_epoch_end(epoch)
+                swa.on_epoch_end(epoch)
 
-            if best_score > score:
-                os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
-                best_score = score
-                early_stop_patience = 0
-                lr_decay_patience = 0
-                tf.keras.models.save_model(
-                    model, 
-                    os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
-                    include_optimizer=False)
-            else:
-                '''
-                if lr_decay_patience == config.lr_patience and config.decay != 1:
-                    optimizer.learning_rate = optimizer.learning_rate * config.decay
-                    print(f'lr: {optimizer.learning_rate.numpy()}')
+                if best_score > score:
+                    os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
+                    best_score = score
+                    early_stop_patience = 0
                     lr_decay_patience = 0
-                '''
-                if early_stop_patience == config.patience:
-                    print(f'Early Stopping at {epoch}, score is {score}')
-                    break
-                early_stop_patience += 1
-                lr_decay_patience += 1
+                    tf.keras.models.save_model(
+                        model, 
+                        os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
+                        include_optimizer=False)
+                else:
+                    '''
+                    if lr_decay_patience == config.lr_patience and config.decay != 1:
+                        optimizer.learning_rate = optimizer.learning_rate * config.decay
+                        print(f'lr: {optimizer.learning_rate.numpy()}')
+                        lr_decay_patience = 0
+                    '''
+                    if early_stop_patience == config.patience:
+                        print(f'Early Stopping at {epoch}, score is {score}')
+                        break
+                    early_stop_patience += 1
+                    lr_decay_patience += 1
+        except tf.errors.ResourceExhaustedError:
+            print('resource exhuasted, get another model')
+            continue
 
         # end of training
         if not os.path.exists('sampling_result'):
             os.makedirs('sampling_result')
         with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
-            json.dump([model_config, train_slosses, train_dlosses, val_slosses, val_dlosses, train_scores, test_score, val_score], f, indent=4)
+            if config.accdoa:
+                json.dump([model_config, train_losses, val_losses, train_scores, test_score, val_score], f, indent=4)
+            else:
+                json.dump([model_config, train_slosses, train_dlosses, val_slosses, val_dlosses, train_scores, test_score, val_score], f, indent=4)
 
 
 if __name__=='__main__':
-    main(get_param())
+    main(args.parse_args())
 
