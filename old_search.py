@@ -9,7 +9,7 @@ import tensorflow as tf
 from data_loader import *
 from metrics import *
 from transforms import *
-from config_sampler import get_old_config
+from config_sampler import get_config
 from search_utils import postprocess_fn
 from model_flop import get_flops
 from model_size import get_model_size
@@ -169,7 +169,7 @@ def train_and_eval(train_config,
             performances[k] = [v]
 
     performances.update({
-        'flops': get_flops(model),
+        'flops': model_flop,
         'size': model_size
     })
     del model, optimizer, history
@@ -328,10 +328,11 @@ def main():
         elif writer.index == 1:
             # search space initializing
             specific_search_space = {'num2d': block_2d_num, 'num1d': block_1d_num}
-            specific_search_space[f'BLOCK'] = {
-                'search_space_2d': search_space_2d,
-                'search_space_1d': search_space_1d,
-            }
+            for i in range(specific_search_space['num2d'][-1] + specific_search_space['num1d'][-1]):
+                specific_search_space[f'BLOCK{i}'] = {
+                    'search_space_2d': search_space_2d,
+                    'search_space_1d': search_space_1d,
+                }
 
             specific_search_space['SED'] = {'search_space_1d': search_space_1d}
             specific_search_space['DOA'] = {'search_space_1d': search_space_1d}
@@ -347,7 +348,7 @@ def main():
                 if len(results) >= train_config.n_samples:
                     break
             while True:
-                model_config = get_old_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
+                model_config = get_config(train_config, search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
                 # 학습
                 start = time.time()
                 try:
@@ -358,7 +359,7 @@ def main():
                     if isinstance(outputs, bool) and outputs == True:
                         print('Model config error! RETRY')
                         continue
-                except ValueError:
+                except:
                     continue
                 break
 
@@ -370,6 +371,7 @@ def main():
             elif train_config.loss:
                 outputs['objective_score'] = np.array(outputs['val_loss'])[-1]
             else:
+                raise Exception('You can\'t get objective score on this code')
                 outputs['objective_score'] = get_objective_score(outputs)
 
             # 결과 저장
@@ -392,6 +394,9 @@ def main():
             target = remove['versus'].split(':')[0]
             unit = ' '.join(remove['result'].split(' ')[:-2])
             results = list(filter(search_space_filter(target, unit), results))
+        
+        if len(results) < train_config.n_samples:
+            raise ValueError('filtering is wrong')
 
         # 분석
         check = True
@@ -414,6 +419,7 @@ def main():
                 else:
                     check = len(res_table) != 0
                     break
+        import pdb; pdb.set_trace()
 
 if __name__=='__main__':
     main()

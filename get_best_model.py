@@ -6,20 +6,18 @@ import os
 
 args = argparse.ArgumentParser()
 args.add_argument('--name', type=str, required=True,
-                  help='name must be {name}_{divided index} ex) 2021_1')
+                  help='name of search')
+args.add_argument('--num', type=int, required=True,
+                  help='number')
 
 metric = 'test_seld_score'
 
 config = args.parse_args()
-if config.name.split('.')[-1] != 'json':
-    config.name += '.json'
 
-with open(config.name, 'r') as f:
-    models = json.load(f)
+with open(f'result/{config.name}/result_{config.num}.json') as f:
+    results = json.load(f)
+results.sort(key=lambda x: x['perf']['objective_score'])
 
-del models['train_config']
-bestmodel = sorted(models.items(), key=lambda x: x[1]['perf'][metric])
-for i in range(1):
-    with open(os.path.join('model_config', os.path.splitext(config.name)[0] + f'_best_model_{i+1}.json'), 'w') as f:
-        json.dump(bestmodel[i][-1]['config'], f, indent=4)
+with open(f'model_config/{config.name}_{config.num}.json','w') as f:
+    json.dump(results[0]['config'], f, indent=4)
     

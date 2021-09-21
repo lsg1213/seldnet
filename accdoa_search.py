@@ -402,7 +402,10 @@ def main():
             target = remove['versus'].split(':')[0]
             unit = ' '.join(remove['result'].split(' ')[:-2])
             results = list(filter(search_space_filter(target, unit), results))
-
+        
+        if len(results) < train_config.n_samples:
+            raise ValueError('filtering is wrong')
+            
         # 분석
         check = True
         table = analyzer(search_space, results, train_config)

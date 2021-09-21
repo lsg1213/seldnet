@@ -20,13 +20,14 @@ def delete_unit(search_space, name, unit, writer):
     for dimension in search_space[name[0]].keys():
         if dimension == 'num':
             continue
-        
+
         for stage in search_space[name[0]][dimension].keys():
             if not (stage == 'mother_stage' and 'kernel_size' in name[1] and unit == 0):
                 if search_space[name[0]][dimension][stage].get(name[1]) == None:
                     continue
                 check = True
                 search_space[name[0]][dimension][stage][name[1]].remove(unit)
+            
             else:
                 raise ValueError('somthing wrong')
     if check:
@@ -182,6 +183,8 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
                 'median': f'{best[0][3]} vs {case[0][3]}',
                 'result': f'{best[-1]} was deleted'
             })
+            if 'kernel_size' in best[-2] and best[-1] == 0:
+                best[-2] = best[-2].split('.')[0] + '.filters' + best[-2][-1]
             update_search_space(search_space, best[-2], best[-1], writer)
             results = result_filtering(results, best[-2], best[-1])
             check = True
@@ -194,6 +197,8 @@ def narrow_search_space(search_space, entire_table, table, results, train_config
                 'median': f'{best[0][3]} vs {case[0][3]}',
                 'result': f'{case[-1]} was deleted'
             })
+            if 'kernel_size' in case[-2] and case[-1] == 0:
+                case[-2] = case[-2].split('.')[0] + '.filters' + case[-2][-1]
             update_search_space(search_space, case[-2], case[-1], writer)
             results = result_filtering(results, case[-2], case[-1])
             check = True

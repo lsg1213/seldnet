@@ -230,7 +230,7 @@ def random_ups_and_downs(x, y):
     offsets_shape = [1] * len(x.shape)
     offsets_shape[-3] = offsets.shape[0]
     offsets = tf.reshape(offsets, offsets_shape)
-    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], axis=-1)
+    x = tf.concat([x[..., :4] + offsets, x[..., 4:]], -1)
     return x, y
 
 
@@ -438,6 +438,9 @@ def main():
             target = remove['versus'].split(':')[0]
             unit = ' '.join(remove['result'].split(' ')[:-2])
             results = list(filter(search_space_filter(target, unit), results))
+        
+        if len(results) < train_config.n_samples:
+            raise ValueError('filtering is wrong')
 
         # 분석
         check = True
