@@ -138,8 +138,8 @@ def generate_teststep(sed_loss, doa_loss, accdoa=True):
     return teststep
 
 
-def generate_iterloop(sed_loss, doa_loss, evaluator, writer, 
-                      mode, loss_weights=None, config=None, accdoa=True):
+def generate_iterloop(sed_loss, doa_loss, evaluator, mode,  
+                      writer=None, loss_weights=None, config=None, accdoa=True):
     if mode == 'train':
         step = generate_trainstep(sed_loss, doa_loss, loss_weights, config, accdoa)
     else:
@@ -181,24 +181,25 @@ def generate_iterloop(sed_loss, doa_loss, evaluator, writer,
                         'seldscore': seld_score.numpy()
                     }))
 
-        writer.add_scalar(f'{mode}/{mode}_ErrorRate', metric_values[0].numpy(),
-                          epoch)
-        writer.add_scalar(f'{mode}/{mode}_F', metric_values[1].numpy(), epoch)
-        writer.add_scalar(f'{mode}/{mode}_DoaErrorRate', 
-                          metric_values[2].numpy(), epoch)
-        writer.add_scalar(f'{mode}/{mode}_DoaErrorRateF', 
-                          metric_values[3].numpy(), epoch)
-        
-        if accdoa:
-            writer.add_scalar(f'{mode}/{mode}_Loss', 
-                            losses.result().numpy(), epoch)
-        else:
-            writer.add_scalar(f'{mode}/{mode}_sedLoss', 
-                            ssloss.result().numpy(), epoch)
-            writer.add_scalar(f'{mode}/{mode}_doaLoss', 
-                            ddloss.result().numpy(), epoch)
-        writer.add_scalar(f'{mode}/{mode}_seldScore', 
-                          seld_score.numpy(), epoch)
+        if writer is not None:
+            writer.add_scalar(f'{mode}/{mode}_ErrorRate', metric_values[0].numpy(),
+                            epoch)
+            writer.add_scalar(f'{mode}/{mode}_F', metric_values[1].numpy(), epoch)
+            writer.add_scalar(f'{mode}/{mode}_DoaErrorRate', 
+                            metric_values[2].numpy(), epoch)
+            writer.add_scalar(f'{mode}/{mode}_DoaErrorRateF', 
+                            metric_values[3].numpy(), epoch)
+            
+            if accdoa:
+                writer.add_scalar(f'{mode}/{mode}_Loss', 
+                                losses.result().numpy(), epoch)
+            else:
+                writer.add_scalar(f'{mode}/{mode}_sedLoss', 
+                                ssloss.result().numpy(), epoch)
+                writer.add_scalar(f'{mode}/{mode}_doaLoss', 
+                                ddloss.result().numpy(), epoch)
+            writer.add_scalar(f'{mode}/{mode}_seldScore', 
+                            seld_score.numpy(), epoch)
 
         if accdoa:
             return seld_score.numpy(), losses.result().numpy()
@@ -324,19 +325,17 @@ def main(config):
     n_classes = 12
     swa_start_epoch = 80
     swa_freq = 2
-
     # data load
     trainset = get_dataset(config, 'train')
     valset = get_dataset(config, 'val')
     testset = get_dataset(config, 'test')
 
     path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
-    test_xs, test_ys = load_seldnet_data(
-        os.path.join(path, 'foa_dev_norm'),
-        os.path.join(path, 'foa_dev_label'), 
-        mode='test', n_freq_bins=64)
-    test_ys = list(map(
-        lambda x: split_total_labels_to_sed_doa(None, x)[-1], test_ys))
+    # test_xs, test_ys = load_seldnet_data(
+    #     os.path.join(path, 'foa_dev_norm'),
+    #     os.path.join(path, 'foa_dev_label'), 
+    #     mode='test', n_freq_bins=64)
+    # test_ys = list(map(lambda x: split_total_labels_to_sed_doa(None, x)[-1], test_ys))
 
     # extract data size
     x, y = [(x, y) for x, y in trainset.take(1)][0]
@@ -361,7 +360,6 @@ def main(config):
     search_space = specific_search_space
     from config_sampler import get_config
 
-    origin_name = config.name
     max_num = 200
     if not os.path.exists('sampling_result'):
         os.makedirs('sampling_result')
@@ -371,25 +369,6 @@ def main(config):
         return
     # model load
     while num < max_num:
-        num = len(glob('sampling_result/*.json'))
-        if num == max_num:
-            print('done')
-            return
-        config.name = origin_name + f'_{num}'
-        with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
-            json.dump([], f, indent=4)
-        tensorboard_path = os.path.join('./tensorboard_log', config.name)
-        if not os.path.exists(tensorboard_path):
-            print(f'tensorboard log directory: {tensorboard_path}')
-            os.makedirs(tensorboard_path)
-        writer = SummaryWriter(logdir=tensorboard_path)
-
-        model_path = os.path.join('./saved_model', config.name)
-        if not os.path.exists(model_path):
-            print(f'saved model directory: {model_path}')
-            os.makedirs(model_path)
-
-        
         while True:
             model_config = get_config(argparse.Namespace(n_classes=12), search_space, input_shape=input_shape, postprocess_fn=postprocess_fn)
             model_config['n_classes'] = n_classes
@@ -418,12 +397,6 @@ def main(config):
         # stochastic weight averaging
         swa = SWA(model, swa_start_epoch, swa_freq)
 
-        if config.resume:
-            _model_path = sorted(glob(model_path + '/*.hdf5'))
-            if len(_model_path) == 0:
-                raise ValueError('the model does not exist, cannot be resumed')
-            model = tf.keras.models.load_model(_model_path[0])
-
         best_score = inf
         early_stop_patience = 0
         lr_decay_patience = 0
@@ -431,12 +404,12 @@ def main(config):
             doa_threshold=config.lad_doa_thresh, n_classes=n_classes)
 
         train_iterloop = generate_iterloop(
-            sed_loss, doa_loss, evaluator, writer, 'train', 
+            sed_loss, doa_loss, evaluator, 'train', 
             loss_weights=list(map(int, config.loss_weight.split(','))), config=config)
         val_iterloop = generate_iterloop(
-            sed_loss, doa_loss, evaluator, writer, 'val')
+            sed_loss, doa_loss, evaluator, 'val')
         test_iterloop = generate_iterloop(
-            sed_loss, doa_loss, evaluator, writer, 'test')
+            sed_loss, doa_loss, evaluator, 'test')
         # evaluate_fn = generate_evaluate_fn(
         #     test_xs, test_ys, evaluator, config.batch*4, writer=writer)
 
@@ -448,9 +421,6 @@ def main(config):
             for epoch in range(config.epoch):
                 if epoch == swa_start_epoch:
                     tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
-
-                # if epoch % 10 == 0:
-                #     evaluate_fn(model, epoch)
 
                 # train loop
                 if config.accdoa:
@@ -475,14 +445,9 @@ def main(config):
                 swa.on_epoch_end(epoch)
 
                 if best_score > score:
-                    os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
                     best_score = score
                     early_stop_patience = 0
                     lr_decay_patience = 0
-                    tf.keras.models.save_model(
-                        model, 
-                        os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
-                        include_optimizer=False)
                 else:
                     '''
                     if lr_decay_patience == config.lr_patience and config.decay != 1:
@@ -496,12 +461,24 @@ def main(config):
                     early_stop_patience += 1
                     lr_decay_patience += 1
         except tf.errors.ResourceExhaustedError:
+            if tf.__version__ >= '2.6.0':
+                if tf.config.list_physical_devices('GPU'):
+                    trainset = get_dataset(config, 'train')
+                    valset = get_dataset(config, 'val')
+                    testset = get_dataset(config, 'test')
+                    tf.config.experimental.reset_memory_stats('GPU:0')
             print('resource exhuasted, get another model')
             continue
 
         # end of training
         if not os.path.exists('sampling_result'):
             os.makedirs('sampling_result')
+
+        num = len(glob('sampling_result/*.json'))
+        if num == max_num:
+            print('done')
+            return
+        
         with open(os.path.join('sampling_result', f'{num}.json'), 'w') as f:
             if config.accdoa:
                 json.dump([model_config, train_losses, val_losses, train_scores, test_score, val_score], f, indent=4)
