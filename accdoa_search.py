@@ -108,7 +108,8 @@ def train_and_eval(train_config,
                    trainset: tf.data.Dataset,
                    valset: tf.data.Dataset,
                    evaluator,
-                   mirrored_strategy):
+                   mirrored_strategy,
+                   valset_doa: tf.data.Dataset=None):
     selected_lr = train_config.lr
     model_size = get_model_size(models.accdoa(input_shape, model_config))
     model_flops = get_flops(models.accdoa(input_shape, model_config))
@@ -142,7 +143,10 @@ def train_and_eval(train_config,
             json.dump(configs + model_config, f, indent=4)
         return True
     # model.set_weights(weights)
-    history = model.fit(trainset, validation_data=valset, epochs=train_config.epoch).history
+    if train_config.accdoa:
+        history = model.fit(trainset, validation_data=valset_doa, epochs=train_config.epoch).history
+    else:
+        history = model.fit(trainset, validation_data=valset, epochs=train_config.epoch).history
 
     if len(performances) == 0:
         for k, v in history.items():
@@ -199,6 +203,8 @@ def delete_sed_label(x, y):
 
 def get_dataset(config, mode: str = 'train'):
     path = config.dataset_path
+    doa = 'doa' in mode
+    mode = mode.split('_')[0]
     x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
                              os.path.join(path, 'foa_dev_label'),
                              mode=mode, n_freq_bins=64)
@@ -213,6 +219,8 @@ def get_dataset(config, mode: str = 'train'):
         batch_transforms = []
     batch_transforms.append(split_total_labels_to_sed_doa)
     if config.accdoa and mode == 'train':
+        batch_transforms.append(delete_sed_label)
+    if config.accdoa and mode == 'val' and doa:
         batch_transforms.append(delete_sed_label)
 
     dataset = seldnet_data_to_dataloader(
@@ -303,9 +311,12 @@ def main():
         with mirrored_strategy.scope():
             trainset = get_dataset(train_config, mode='train')
             valset = get_dataset(train_config, mode='val')
+            if train_config.accdoa:
+                valset_doa = get_dataset(train_config, mode='val_doa')
     else:
         trainset = get_dataset(train_config, mode='train')
         valset = get_dataset(train_config, mode='val')
+        valset_doa = get_dataset(train_config, mode='val_doa')
     
     # Evaluator
     evaluator = SELDMetrics(doa_threshold=20, n_classes=train_config.n_classes)
@@ -364,7 +375,7 @@ def main():
                     outputs = train_and_eval(
                         train_config, model_config, 
                         input_shape, 
-                        trainset, valset, evaluator, mirrored_strategy)
+                        trainset, valset, evaluator, mirrored_strategy, valset_doa=valset_doa)
                     if isinstance(outputs, bool) and outputs == True:
                         print('Model config error! RETRY')
                         continue
