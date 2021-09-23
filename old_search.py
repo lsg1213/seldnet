@@ -360,6 +360,10 @@ def main():
                         print('Model config error! RETRY')
                         continue
                 except:
+                    print('Resource error')
+                    if tf.__version__ >= '2.6.0':
+                        if tf.config.list_physical_devices('GPU'):
+                            tf.config.experimental.reset_memory_stats('GPU:0')
                     continue
                 break
 
@@ -381,6 +385,9 @@ def main():
                     break
             results.append({'config': model_config, 'perf': outputs})
             writer.dump(results, current_result_path)
+            if tf.__version__ >= '2.6.0':
+                if tf.config.list_physical_devices('GPU'):
+                    tf.config.experimental.reset_memory_stats('GPU:0')
         
         # 그동안 모든 결과 부르기
         results = []
@@ -419,7 +426,7 @@ def main():
                 else:
                     check = len(res_table) != 0
                     break
-        import pdb; pdb.set_trace()
+
 
 if __name__=='__main__':
     main()
