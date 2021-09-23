@@ -129,7 +129,8 @@ def table_filter(table, search_space, threshold=0.05):
 
     def _table_filter(x):
         if x[-2] in blocks and len(values[x[-2]]) == 1:
-            return False
+            if len(values[x[-2]][0]) == 1:
+                return False
         if x[0][0] > threshold:
             return False
         if x[-2] == 'identity_block' or x[-1] == 'identity_block':
