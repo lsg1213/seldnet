@@ -1,12 +1,15 @@
+import random as rnd
+from multiprocessing import cpu_count
+
 import numpy as np
 import tensorflow as tf
-from feature_extractor import *
-import random as rnd
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from multiprocessing import cpu_count
 from tqdm import tqdm
 import tensorflow_io as tfio
 import joblib
+
+from feature_extractor import *
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from data_utils import spec_augment
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
@@ -264,6 +267,7 @@ def gcc_features_tf(complex_specs, n_mels):
 
     return tf.stack(gcc_feat, axis=0)
 
+
 def get_preprocessed_x(wav, sample_rate, mode='foa', n_mels=64,
                        multiplier=5, max_label_length=600, **kwargs):
     device = get_device()
@@ -307,6 +311,7 @@ def get_preprocessed_x(wav, sample_rate, mode='foa', n_mels=64,
 
     return features
 
+
 def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
                           multiplier=5, max_label_length=600, win_length=1024,
                           hop_length=480, n_fft=1024):
@@ -349,36 +354,58 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
     return features
 
 
+class Pipline_Trainset_Dataloader:
+    def __init__(self, path, batch, frame=300, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
+        self.x, self.y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
+                             os.path.join(path, 'foa_dev_label'),
+                             mode='train')
+        self.x = tf.concat(self.x, 0) # (time_frame, freq, chan)
+        self.y = tf.concat(self.y, 0) # (time_label, SED+DOA)
+        if self.x.shape[0] % self.y.shape[0] != 0:
+            raise ValueError('data resolution is wrong')
+        self.resolution = self.x.shape[0] // self.y.shape[0]
+        self.frame = frame
+        self.iters = iters
+        self.sample_preprocessing = sample_preprocessing
+        self.batch_preprocessing = batch_preprocessing
+        self.batch = batch
+        
+        self.sample_preprocessing.append(EMDA(*self.get_mono_audio()))
+
+    def __next__(self):
+        y_idx = tf.random.uniform((self.iters,), maxval=self.y.shape[0] // self.resolution, dtype=tf.int32)
+        x_idx = y_idx * self.resolution
+        x = tf.gather(self.x, [tf.range(i, i + self.frame) for i in x_idx])
+        y = tf.gather(self.y, [tf.range(i, i + self.frame // self.resolution) for i in y_idx])
+        trainset = tf.data.Dataset.from_tensor_slices((x, y))
+
+
+        print('sample_preprocessing')
+        for pre in self.sample_preprocessing:
+            trainset.map(pre)
+
+        trainset = trainset.batch(self.batch)
+        
+        print('batch_preprocessing')
+        for pre in self.preprocessing:
+            trainset.map(pre)
+
+        return trainset.prefetch(tf.data.AUTOTUNE)
+
+    def get_mono_audio(self):
+        class_num = self.y.shape[-1] // 4
+        idx = tf.where(tf.reduce_sum(self.y[...,:class_num], -1) == 1)[...,0]
+        mono_y = tf.gather(self.y, idx)
+        x_idx = [x for y in [list(range(i, i+self.resolution)) for i in idx] for x in y]
+        mono_x = tf.gather(self.x, idx)
+        return mono_x, mono_y
+
 
 if __name__ == '__main__':
-    ''' An example of how to use '''
-    import os
-    import time
-    from transforms import *
-
-    path = '/media/data1/datasets/DCASE2020/feat_label/'
-    x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
-                             os.path.join(path, 'foa_dev_label'),
-                             mode='val')
-
-    sample_transforms = [
-        lambda x, y: (mask(x, axis=-3, max_mask_size=24, n_mask=6), y),
-        lambda x, y: (mask(x, axis=-2, max_mask_size=8), y),
-    ]
-    batch_transforms = [
-        split_total_labels_to_sed_doa,
-    ]
-    dataset = seldnet_data_to_dataloader(
-        x, y,
-        sample_transforms=sample_transforms,
-        batch_transforms=batch_transforms,
-    )
-
-    start = time.time()
-    for i in range(10):
-        for x, y in dataset:
-            pass
-
-        print(time.time() - start)
-        start = time.time()
+    path = '/root/datasets/DCASE2021_test/feat_label/'
+    sample_preprocessing = []
+    batch_preprocessing = [spec_augment]
+    trainsetloader = Pipline_Trainset_Dataloader(path, batch=256, sample_preprocessing=sample_preprocessing, batch_preprocessing=batch_preprocessing)
+    trainset = next(trainsetloader)
+    
  
