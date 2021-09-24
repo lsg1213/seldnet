@@ -33,6 +33,8 @@ class Writer:
         return path
 
     def dump(self, content, path):
+        self.spin_wait(path)
+        self.lock(path)
         if not isinstance(content, (list, tuple, dict, set)):
             try:
                 content = vars(content)
@@ -41,8 +43,11 @@ class Writer:
 
         with open(path, 'w') as f:
             json.dump(content, f, indent=4)
+        self.unlock(path)
     
     def load(self, path):
+        self.spin_wait(path)
+        self.lock(path)
         count = 0
         while True:
             try:
@@ -55,7 +60,7 @@ class Writer:
                 if count == 10:
                     with open(path, 'r') as f:
                         return json.load(f)
-
+        self.unlock(path)
 
     def get_index(self):
         previous_results = sorted(glob(os.path.join(self.result_path, f'result_*')))
@@ -65,3 +70,21 @@ class Writer:
         else:
             index = 0
         return index
+    
+    def spin_wait(self, path):
+        path = path + '.lock'
+        while True:
+            if os.path.exists(path):
+                sleep(1)
+                continue
+            break
+
+    def lock(self, path):
+        path = path + '.lock'
+        self.dump([], path)
+
+    def unlock(self, path):
+        path = path + '.lock'
+        if os.path.exists(path):
+            os.remove(path)
+    
