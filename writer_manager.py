@@ -48,19 +48,16 @@ class Writer:
     def load(self, path):
         self.spin_wait(path)
         self.lock(path)
-        count = 0
+        out = None
         while True:
             try:
                 with open(path, 'r') as f:
-                    return json.load(f)
+                    out = json.load(f)
+                break
             except json.decoder.JSONDecodeError:
-                sleep(1)
-                count += 1
-            finally:
-                if count == 10:
-                    with open(path, 'r') as f:
-                        return json.load(f)
+                sleep(5)
         self.unlock(path)
+        return out
 
     def get_index(self):
         previous_results = sorted(glob(os.path.join(self.result_path, f'result_*')))
@@ -75,13 +72,15 @@ class Writer:
         path = path + '.lock'
         while True:
             if os.path.exists(path):
+                print('spin waiting...')
                 sleep(1)
                 continue
             break
 
     def lock(self, path):
         path = path + '.lock'
-        self.dump([], path)
+        with open(path, 'w') as f:
+            json.dump([], f)
 
     def unlock(self, path):
         path = path + '.lock'
