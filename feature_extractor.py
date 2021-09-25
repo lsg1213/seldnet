@@ -2,7 +2,7 @@ import numpy as np
 import os
 import torch
 import torchaudio
-import tqdm
+from tqdm import tqdm
 from functools import partial
 from glob import glob
 from torch.fft import irfft
@@ -34,7 +34,7 @@ def extract_seldnet_data(feature_path: str,
     def extract_name(path):
         return path[path.rfind(os.path.sep)+1:path.rfind('.')]
 
-    for f, l in tqdm.tqdm(zip(f_paths, l_paths)):
+    for f, l in tqdm(zip(f_paths, l_paths)):
         # name must match
         name = extract_name(f)
         if name != extract_name(l):
@@ -227,7 +227,7 @@ def apply_normalizer(feature_path, new_feature_path, mean, std, eps=1e-8):
     features = sorted(glob(os.path.join(feature_path, '*.npy')))
     create_folder(new_feature_path)
 
-    for feature in tqdm.tqdm(features):
+    for feature in tqdm(features):
         new_name = os.path.join(new_feature_path, 
                                 os.path.split(feature)[1])
         new_feat = (np.load(feature) - mean) / np.maximum(std, eps)
