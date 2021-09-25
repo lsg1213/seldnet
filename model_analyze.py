@@ -26,8 +26,11 @@ def delete_unit(search_space, name, unit, writer):
                 if search_space[name[0]][dimension][stage].get(name[1]) == None:
                     continue
                 check = True
-                search_space[name[0]][dimension][stage][name[1]].remove(unit)
-            
+                while True:
+                    try:
+                        search_space[name[0]][dimension][stage][name[1]].remove(unit)
+                    except:
+                        break
             else:
                 raise ValueError('somthing wrong')
     if check:
