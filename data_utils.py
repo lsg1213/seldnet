@@ -1,6 +1,8 @@
-import numpy as np
 import os
+
+import numpy as np
 import torchaudio
+import tensorflow as tf
 
 
 def create_folder(folder_name):
@@ -102,6 +104,16 @@ def EMDA(raw_x, raw_y):
         if x.shape[0] % y.shape[0] != 0:
             raise ValueError('resolution is not matched')
         resolution = x.shape[0] // y.shape[0]
+        class_num = y.shape[-1] // 4
+        
+        y_frame_size = tf.random.uniform([1], maxval=y.shape[0], dtype=tf.int32)[0] # y에 넣을 frame 크기 구하기
+        y_offset = tf.random.uniform([1], maxval=y.shape[0] - y_frame_size, dtype=tf.int32)[0] # 프레임 크기를 고려하여 offset 설정
+        mono_frame_size = y_frame_size
+        mono_y_offset = tf.random.uniform([1], maxval=raw_y.shape[0] - mono_frame_size, dtype=tf.int32)[0]
+
+        mono_y_frame = tf.gather(raw_y, tf.range(mono_y_offset, mono_y_offset + mono_frame_size))
         import pdb; pdb.set_trace()
+
         return x, y
     return _EMDA
+    
