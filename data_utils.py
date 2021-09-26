@@ -108,11 +108,27 @@ def EMDA(raw_x, raw_y):
         
         y_frame_size = tf.random.uniform([1], maxval=y.shape[0], dtype=tf.int32)[0] # y에 넣을 frame 크기 구하기
         y_offset = tf.random.uniform([1], maxval=y.shape[0] - y_frame_size, dtype=tf.int32)[0] # 프레임 크기를 고려하여 offset 설정
-        mono_frame_size = y_frame_size
-        mono_y_offset = tf.random.uniform([1], maxval=raw_y.shape[0] - mono_frame_size, dtype=tf.int32)[0]
+        mono_y_frame_size = y_frame_size
+        mono_y_offset = tf.random.uniform([1], maxval=raw_y.shape[0] - mono_y_frame_size, dtype=tf.int32)[0]
 
-        mono_y_frame = tf.gather(raw_y, tf.range(mono_y_offset, mono_y_offset + mono_frame_size))
+        x_frame_size = y_frame_size * resolution
+        x_offset = y_offset * resolution
+        mono_x_frame_size = x_frame_size
+        mono_x_offset = mono_y_offset * resolution
+
+        mono_y_frame = tf.reshape(raw_y[mono_y_offset:mono_y_offset + y.shape[0]], [y.shape[0]] + [*raw_y[mono_y_offset:mono_y_offset + y.shape[0]].shape[1:]])
+        mono_x_frame = tf.reshape(raw_x[mono_x_offset:mono_x_offset + y.shape[0] * resolution], [x.shape[0]] + [*raw_x[mono_x_offset:mono_x_offset + y.shape[0] * resolution]])
+
+        random_y_frame_offset = tf.random.uniform([1], maxval=y.shape[0] - mono_y_frame.shape[0], dtype=tf.int32)[0]
+
+        y_idx = tf.where(tf.reduce_sum(y[..., :class_num], -1) < 2)
+        x_idx = tf.reshape(tf.reshape(tf.range(resolution, dtype=y_idx.dtype), (1, -1)) + y_idx * resolution, (-1,))
+        y_idx = y_idx[..., 0]
+
+        ratio = tf.random.uniform([1], maxval=1)[0]
+        y = tf.where(tf.reduce_sum(y[..., :class_num], -1) < 2, x=ratio * y + (1 - ratio) * mono_y_frame, y=y)
         import pdb; pdb.set_trace()
+        # mono_x_frame = tf.gather(raw_x, tf.range())
 
         return x, y
     return _EMDA
