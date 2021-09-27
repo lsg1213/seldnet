@@ -96,7 +96,6 @@ def main():
         train_score.append([np.array(result[5][epoch - 1]) for epoch in range(start_epoch - 1, end_epoch)])
         train_finalscore.append([np.array(result[5][-1]) for epoch in range(start_epoch - 1, end_epoch)])
 
-
     val_sloss = np.array(val_sloss) # (model num, epoch,)
     val_dloss = np.array(val_dloss)
     val_emadloss = np.array(val_emadloss)
@@ -120,8 +119,11 @@ def main():
     train_objective_score = get_objective_score(train_finalscore, total_train_loss, train_ema_subtract_loss)
     # filter
     if config.outlier:
-        condition = np.where(objective_score[:,7] < 3)
-        objective_score = objective_score[condition]
+        # condition = np.where(objective_score[:,7] < 3)
+        condition = np.argsort(total_val_loss[..., -1]) # val_score랑 total_val_loss는 correlation 값 동일
+        condition = condition[int(len(condition) / 100 * 50) > condition]
+        train_objective_score = train_objective_score[condition]
+        val_objective_score = val_objective_score[condition]
         test_seldscore = test_seldscore[condition]
         val_sloss = val_sloss[condition]
         val_dloss = val_dloss[condition]
@@ -141,8 +143,8 @@ def main():
         # data = np.corrcoef(np.concatenate([val_emasloss + val_emadloss * 1000, test_seldscore[...,:1]], -1).T)
         # data = np.corrcoef(np.concatenate([total_val_loss[...,1:], test_seldscore[...,:1]], -1).T)
         # data, p_value = spearmanr(np.concatenate([objective_score[...,1:], test_seldscore[...,:1]], -1))
-        data, p_value = spearmanr(np.concatenate([train_objective_score[..., 1:], test_seldscore[...,:1]], -1))
-        data2, p_value2 = spearmanr(np.concatenate([val_objective_score[..., 1:], test_seldscore[...,:1]], -1))
+        data, p_value = spearmanr(np.concatenate([total_train_loss[..., 1:], test_seldscore[..., :1]], -1))
+        data2, p_value2 = spearmanr(np.concatenate([total_val_loss[..., 1:], test_seldscore[..., :1]], -1))
         row_indices = [str(i) for i in range(start_epoch + 1, end_epoch + 1)] + ['test_score']
         column_names = ['test_score']
         # data_df = pd.DataFrame(data[...,-1], index=row_indices, columns=column_names)
@@ -151,10 +153,10 @@ def main():
         #     # annot=True,
         #     xticklabels=corr.columns.values,
         #     yticklabels=corr.columns.values,vmin=-1, vmax=1)
-        data = data[:-1, -1]
-        data2 = data2[:-1, -1]
-        line1, = plt.plot(list(range(2, len(data) + 2)), data, color='b', label='train_score')
-        line2, = plt.plot(list(range(2, len(data2) + 2)), data2, color='r', label='val_score')
+        data = data[-1,:-1]
+        data2 = data2[-1,:-1]
+        line1, = plt.plot(list(range(2, len(data) + 2)), data, color='b', label='train_loss')
+        line2, = plt.plot(list(range(2, len(data2) + 2)), data2, color='r', label='val_loss')
         line3, = plt.plot(list(range(2, len(data) + 2)), np.ones(len(data)) * 0.7, color='g')
         plt.xticks(range(2, len(data) + 2))
         plt.yticks([i / 100 for i in list(range(40, 100, 5))])
