@@ -1,5 +1,6 @@
 import random as rnd
 from multiprocessing import cpu_count
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import tensorflow as tf
@@ -101,8 +102,9 @@ def load_wav_and_label(feat_path, label_path, mode='train'):
         x: wave form -> (data_num, channel(4), time)
         y: label(padded) -> (data_num, time, 56)
     '''
-    f_paths = sorted(glob(os.path.join(feat_path, '*.wav')))
-    l_paths = sorted(glob(os.path.join(label_path, '*.csv')))
+    
+    f_paths = sorted(glob(os.path.join(feat_path, f'dev-{mode}', '*.wav')))
+    l_paths = sorted(glob(os.path.join(label_path, f'dev-{mode}', '*.csv')))
 
     splits = {
         'train': [1, 2, 3, 4],
@@ -127,9 +129,12 @@ def load_wav_and_label(feat_path, label_path, mode='train'):
         else:
             labels = labels[:max_len]
         return labels
-    x = list(map(lambda x: tf.transpose(tf.audio.decode_wav(tf.io.read_file(x))[0]), f_paths))
-    y = list(map(lambda x: preprocess_label(extract_labels(x)), l_paths))
-    return x, y
+    sr = tf.audio.decode_wav(tf.io.read_file(f_paths[0]))[1]
+    with ThreadPoolExecutor() as pool:
+        x = list(pool.map(lambda x: tf.audio.decode_wav(tf.io.read_file(x))[0], f_paths))
+    with ThreadPoolExecutor() as pool:
+        y = list(pool.map(lambda x: preprocess_label(extract_labels(x)), l_paths))
+    return x, y, sr
 
 
 def seldnet_data_to_dataloader(features: [list, tuple], 
@@ -356,11 +361,11 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
 
 class Pipline_Trainset_Dataloader:
     def __init__(self, path, batch, frame=300, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
-        self.x, self.y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
-                             os.path.join(path, 'foa_dev_label'),
+        self.x, self.y, self.sr = load_wav_and_label(os.path.join(path, 'foa_dev'),
+                             os.path.join(path, 'metadata_dev'),
                              mode='train')
-        self.x = tf.concat(self.x, 0) # (time_frame, freq, chan)
-        self.y = tf.concat(self.y, 0) # (time_label, SED+DOA)
+        self.x = tf.stack(self.x, 0) # (sample_num, time, chan)
+        self.y = tf.stack(self.y, 0) # (sample_num, time, SED+DOA)
         if self.x.shape[0] % self.y.shape[0] != 0:
             raise ValueError('data resolution is wrong')
         self.resolution = self.x.shape[0] // self.y.shape[0]
@@ -370,7 +375,7 @@ class Pipline_Trainset_Dataloader:
         self.batch_preprocessing = batch_preprocessing
         self.batch = batch
         
-        self.sample_preprocessing.append(EMDA(*self.get_mono_audio()))
+        self.sample_preprocessing.append(EMDA(*self.get_mono_audio(), sr=self.sr))
 
     def __next__(self):
         y_idx = tf.random.uniform((self.iters,), maxval=self.y.shape[0] // self.resolution, dtype=tf.int32)
@@ -402,7 +407,7 @@ class Pipline_Trainset_Dataloader:
 
 
 if __name__ == '__main__':
-    path = '/root/datasets/DCASE2021_test/feat_label/'
+    path = '/root/datasets/DCASE2021'
     sample_preprocessing = []
     batch_preprocessing = [spec_augment]
     trainsetloader = Pipline_Trainset_Dataloader(path, batch=256, sample_preprocessing=sample_preprocessing, batch_preprocessing=batch_preprocessing)
