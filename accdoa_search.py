@@ -79,7 +79,7 @@ search_space_1d = {
         {'transformer_depth': [1, 2],
         'transformer_n_head': [1, 2, 4],
         'transformer_key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32],
-        'ff_multiplier': [0.25, 0.5, 1, 2],
+        'ff_multiplier': [0.25, 0.5, 1., 2.],
         'transformer_kernel_size': [1, 3, 5]},
     'simple_dense_stage':
         {'dense_depth': [1, 2],
