@@ -77,7 +77,7 @@ search_space_1d = {
         {'transformer_depth': [1, 2, 3],
          'transformer_n_head': [1, 2, 4, 8, 16],
          'transformer_key_dim': [2, 3, 4, 6, 8, 12, 16, 24, 32, 48],
-         'ff_multiplier': [0.25, 0.5, 1, 2, 4, 8],
+         'ff_multiplier': [0.25, 0.5, 1., 2., 4., 8.],
          'transformer_kernel_size': [1, 3, 5]},
     'simple_dense_stage':
         {'dense_depth': [1, 2, 3],
@@ -249,11 +249,17 @@ def search_space_filter(target, unit):
             v = v.get(target[1])
             if v is None:
                 # target[1] = '_'.join(target[1].split('_')[1:])
-                v = results['config'].get(target[0]).get(target[1])
+                v = results['config'].get(target[0])
                 if v is None:
                     raise ValueError()
-        if type(v) != type(unit):
-            raise TypeError('value and unit must be same type')
+                else:
+                    v = v.get(target[1])
+                    
+        if type(v) != type(unit) and v is not None:
+            if target[1] == 'ff_multiplier':
+                v = float(v)
+            else:
+                raise TypeError('value and unit must be same type')
         return v != unit
     return _search_space_filter
 
@@ -401,9 +407,6 @@ def main():
             target = remove['versus'].split(':')[0]
             unit = ' '.join(remove['result'].split(' ')[:-2])
             results = list(filter(search_space_filter(target, unit), results))
-        
-        if len(results) < train_config.n_samples:
-            raise ValueError('filtering is wrong')
 
         # 분석
         check = True
