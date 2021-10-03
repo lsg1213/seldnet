@@ -96,52 +96,6 @@ def spec_augment(x, y):
     warped_frequency_time_sepctrogram, y = time_masking(warped_frequency_spectrogram, y, tau=tau)
 
     return warped_frequency_time_sepctrogram, y
-
-
-def EMDA(raw_x, raw_y, sr=24000):
-    # raw_x, raw_y : mono class sound
-    equilizer = biquad_equilizer(sr)
-    def _EMDA(x, y):
-        # x = (time, freq, chan)
-        if x.shape[0] % y.shape[0] != 0:
-            raise ValueError('resolution is not matched')
-        resolution = x.shape[0] // y.shape[0]
-        class_num = y.shape[-1] // 4
-        
-        import pdb; pdb.set_trace()
-        y_frame_size = tf.random.uniform([1], maxval=y.shape[0], dtype=tf.int32)[0] # y에 넣을 frame 크기 구하기
-        y_offset = tf.random.uniform([1], maxval=y.shape[0] - y_frame_size, dtype=tf.int32)[0] # 프레임 크기를 고려하여 offset 설정
-        mono_y_frame_size = y_frame_size
-        mono_y_offset = tf.random.uniform([1], maxval=raw_y.shape[0] - mono_y_frame_size, dtype=tf.int32)[0]
-
-        x_frame_size = y_frame_size * resolution
-        x_offset = y_offset * resolution
-        mono_x_frame_size = x_frame_size
-        mono_x_offset = mono_y_offset * resolution
-
-        mono_y_frame = raw_y[mono_y_offset:mono_y_offset + mono_y_frame_size]
-        y_frame_offset = tf.random.uniform([1], maxval=y.shape[0] - tf.shape(mono_y_frame)[0], dtype=tf.int32)[0]
-        mono_y_frame = tf.pad(mono_y_frame, ((y_frame_offset, y.shape[0] - y_frame_offset - tf.shape(mono_y_frame)[0]),(0,0)))
-        mono_y_frame = tf.reshape(mono_y_frame, [*y.shape])
-        
-        mono_x_frame = raw_x[mono_x_offset:mono_x_offset + mono_x_frame_size * resolution]
-        x_frame_offset = y_frame_offset * resolution
-        mono_x_frame = tf.pad(mono_x_frame, ((x_frame_offset, x.shape[0] - x_frame_offset - tf.shape(mono_x_frame)[0]),(0,0),(0,0)))
-        mono_x_frame = tf.reshape(mono_x_frame, [*x.shape])
-        mono_x_frame = equilizer(mono_x_frame)
-        
-        ratio = tf.random.uniform([1], minval=1e-3, maxval=1 - 1e-3)[0]
-        sampled_x_frame = equilizer(x)
-        # class number in same frame constraint
-        cond = tf.reduce_sum(tf.cast((y[...,:class_num] + mono_y_frame[...,:class_num]) < 2, tf.float32), -1) == 1 # 합성 후 같은 class가 같은 frame에 존재하는 지 여부 탐색
-        cond = tf.logical_and(cond, tf.reduce_sum(y[..., :class_num], -1) < 2) # 원래 class가 2개 미만인 프레임만 합성
-        y = tf.where(cond, x=y + mono_y_frame, y=y)
-        x = tf.where(tf.repeat(cond, resolution), x=ratio * sampled_x_frame + (1 - ratio) * mono_x_frame, y=x)
-        import pdb; pdb.set_trace()
-        # mono_x_frame = tf.gather(raw_x, tf.range())
-
-        return x, y
-    return _EMDA
     
 
 def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9]):
@@ -174,9 +128,10 @@ def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9])
         return lfilter(wav, tf.concat([a0, a1, a2], 0), tf.concat([b0, b1, b2], 0))
 
     def lfilter(wav, a_coeffs, b_coeffs):
+        dtype = wav.dtype
         # (time, chan)
-        wav = ss.filtfilt(b_coeffs, a_coeffs, wav, axis=1)
-        return tf.clip_by_value(wav, -1., 1.)
+        wav = ss.filtfilt(b_coeffs, a_coeffs, wav, axis=0)
+        return tf.cast(tf.clip_by_value(wav, -1., 1.), dtype=dtype)
     return _band_biquad_equilizer
 
 
