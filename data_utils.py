@@ -3,6 +3,7 @@ import os
 import numpy as np
 import torchaudio
 import tensorflow as tf
+import scipy.signal as ss
 
 
 def create_folder(folder_name):
@@ -95,25 +96,48 @@ def spec_augment(x, y):
     warped_frequency_time_sepctrogram, y = time_masking(warped_frequency_spectrogram, y, tau=tau)
 
     return warped_frequency_time_sepctrogram, y
-
-
-def EMDA(raw_x, raw_y):
-    # raw_x, raw_y : mono class sound
-    def _EMDA(x, y):
-        # x = (time, freq, chan)
-        if x.shape[0] % y.shape[0] != 0:
-            raise ValueError('resolution is not matched')
-        resolution = x.shape[0] // y.shape[0]
-        class_num = y.shape[-1] // 4
-        
-        y_frame_size = tf.random.uniform([1], maxval=y.shape[0], dtype=tf.int32)[0] # y에 넣을 frame 크기 구하기
-        y_offset = tf.random.uniform([1], maxval=y.shape[0] - y_frame_size, dtype=tf.int32)[0] # 프레임 크기를 고려하여 offset 설정
-        mono_frame_size = y_frame_size
-        mono_y_offset = tf.random.uniform([1], maxval=raw_y.shape[0] - mono_frame_size, dtype=tf.int32)[0]
-
-        mono_y_frame = tf.gather(raw_y, tf.range(mono_y_offset, mono_y_offset + mono_frame_size))
-        import pdb; pdb.set_trace()
-
-        return x, y
-    return _EMDA
     
+
+def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9]):
+    '''
+    central_freq: central frequency
+    g: gain
+    Q: Q-factor
+    '''
+    def _band_biquad_equilizer(wav):
+        gain = tf.random.uniform([1], minval=g[0], maxval=g[1])[0]
+        central_frequency = tf.random.uniform([1], minval=central_freq[0], maxval=central_freq[1])[0]
+        Qfactor = tf.random.uniform([1], minval=Q[0], maxval=Q[1])[0]
+
+        # wav *= gain
+
+        w0 = 2 * np.math.pi * central_frequency / sampling_rate
+        bw_Hz = central_frequency / Qfactor
+
+        a0 = tf.constant(1.0, dtype=wav.dtype)
+        a2 = tf.exp(-2 * np.math.pi * bw_Hz / sampling_rate)
+        a1 = -4 * a2 / (1 + a2) * tf.cos(w0)
+
+        b0 = tf.sqrt(1 - a1 * a1 / (4 * a2)) * (1 - a2)
+
+        b1 = tf.constant(0., dtype=wav.dtype)
+        b2 = tf.constant(0., dtype=wav.dtype)
+        return biquad(wav, b0, b1, b2, a0, a1, a2)
+
+    def biquad(wav, b0, b1, b2, a0, a1, a2):
+        return lfilter(wav, tf.concat([a0, a1, a2], 0), tf.concat([b0, b1, b2], 0))
+
+    def lfilter(wav, a_coeffs, b_coeffs):
+        dtype = wav.dtype
+        # (time, chan)
+        wav = ss.filtfilt(b_coeffs, a_coeffs, wav, axis=0)
+        return tf.cast(tf.clip_by_value(wav, -1., 1.), dtype=dtype)
+    return _band_biquad_equilizer
+
+
+if __name__ == '__main__':
+    import tensorflow as tf
+    aa = tf.random.uniform([300,3])
+    bb = biquad_equilizer(24000)(aa)
+    import pdb; pdb.set_trace()
+    print()

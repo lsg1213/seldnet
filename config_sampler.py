@@ -96,6 +96,9 @@ def get_block_config(search_space, model_config, stage_name='BLOCK'):
                     model_arg_config[k] = v
             idx_2d += 1
         elif idx_1d < num1d:
+            if len(sp['search_space_1d']) == 0:
+                num1d -= 1
+                continue
             model_config[name] = choice([i for i in sp['search_space_1d'].keys() if i != 'num'])
 
             model_arg_config = {}

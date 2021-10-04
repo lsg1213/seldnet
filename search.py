@@ -294,11 +294,17 @@ def search_space_filter(target, unit):
             v = v.get(target[1])
             if v is None:
                 # target[1] = '_'.join(target[1].split('_')[1:])
-                v = results['config'].get(target[0]).get(target[1])
+                v = results['config'].get(target[0])
                 if v is None:
                     raise ValueError()
-        if type(v) != type(unit):
-            raise TypeError('value and unit must be same type')
+                else:
+                    v = v.get(target[1])
+                    
+        if type(v) != type(unit) and v is not None:
+            if target[1] == 'ff_multiplier':
+                v = float(v)
+            else:
+                raise TypeError('value and unit must be same type')
         return v != unit
     return _search_space_filter
 

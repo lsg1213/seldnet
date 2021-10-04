@@ -1,5 +1,6 @@
 import random as rnd
 from multiprocessing import cpu_count
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import tensorflow as tf
@@ -95,14 +96,15 @@ def load_seldnet_data(feat_path, label_path, mode='train', n_freq_bins=64):
     return features, labels
 
 
-def load_wav_and_label(feat_path, label_path, mode='train'):
+def load_wav_and_label(feat_path, label_path, mode='train', class_num=12):
     '''
         output
         x: wave form -> (data_num, channel(4), time)
         y: label(padded) -> (data_num, time, 56)
     '''
-    f_paths = sorted(glob(os.path.join(feat_path, '*.wav')))
-    l_paths = sorted(glob(os.path.join(label_path, '*.csv')))
+    
+    f_paths = sorted(glob(os.path.join(feat_path, f'dev-{mode}', '*.wav')))
+    l_paths = sorted(glob(os.path.join(label_path, f'dev-{mode}', '*.csv')))
 
     splits = {
         'train': [1, 2, 3, 4],
@@ -127,9 +129,12 @@ def load_wav_and_label(feat_path, label_path, mode='train'):
         else:
             labels = labels[:max_len]
         return labels
-    x = list(map(lambda x: tf.transpose(tf.audio.decode_wav(tf.io.read_file(x))[0]), f_paths))
-    y = list(map(lambda x: preprocess_label(extract_labels(x)), l_paths))
-    return x, y
+    sr = tf.audio.decode_wav(tf.io.read_file(f_paths[0]))[1]
+    with ThreadPoolExecutor() as pool:
+        x = list(pool.map(lambda x: tf.audio.decode_wav(tf.io.read_file(x))[0], f_paths))
+    with ThreadPoolExecutor() as pool:
+        y = list(pool.map(lambda x: preprocess_label(extract_labels(x, class_num)), l_paths))
+    return x, y, int(sr)
 
 
 def seldnet_data_to_dataloader(features: [list, tuple], 
@@ -355,30 +360,48 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
 
 
 class Pipline_Trainset_Dataloader:
-    def __init__(self, path, batch, frame=300, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
-        self.x, self.y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
-                             os.path.join(path, 'foa_dev_label'),
+    def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
+        self.x, self.y, self.sr = load_wav_and_label(os.path.join(path, 'foa_dev'),
+                             os.path.join(path, 'metadata_dev'),
                              mode='train')
-        self.x = tf.concat(self.x, 0) # (time_frame, freq, chan)
-        self.y = tf.concat(self.y, 0) # (time_label, SED+DOA)
-        if self.x.shape[0] % self.y.shape[0] != 0:
+        self.x = tf.stack(self.x, 0) # (sample_num, time(=label_time * self.resolution), chan)
+        self.y = tf.stack(self.y, 0) # (sample_num, label_time, SED+DOA)
+        if self.x.shape[1] % self.y.shape[1] != 0:
             raise ValueError('data resolution is wrong')
-        self.resolution = self.x.shape[0] // self.y.shape[0]
-        self.frame = frame
+        self.label_len = 0.1 # 0.1 second
+        self.frame = int(frame_len * self.sr) # frame_len: second
+        self.frame_num = frame_num
         self.iters = iters
         self.sample_preprocessing = sample_preprocessing
         self.batch_preprocessing = batch_preprocessing
+        self.class_num = self.y.shape[-1] // 4
         self.batch = batch
+        self.nfft = int(frame_len * self.sr)
+        self.win_len = self.nfft
+        self.hop_len = self.win_len // 2
+        self.resolution = int(self.sr * self.label_len / self.hop_len) # 10: transform 이후 label과 feature 사이 resolution
         
-        self.sample_preprocessing.append(EMDA(*self.get_mono_audio()))
+        self.sample_preprocessing.append(self.EMDA(self.get_mono_y_idx()))
 
     def __next__(self):
-        y_idx = tf.random.uniform((self.iters,), maxval=self.y.shape[0] // self.resolution, dtype=tf.int32)
-        x_idx = y_idx * self.resolution
-        x = tf.gather(self.x, [tf.range(i, i + self.frame) for i in x_idx])
-        y = tf.gather(self.y, [tf.range(i, i + self.frame // self.resolution) for i in y_idx])
-        trainset = tf.data.Dataset.from_tensor_slices((x, y))
+        # shuffle
+        idx = tf.random.shuffle(tf.range(0, self.x.shape[0]))
+        self.X, self.Y = tf.reshape(tf.gather(self.x, idx), [-1, self.x.shape[-1]]), tf.reshape(tf.gather(self.y, idx), [-1, self.y.shape[-1]])
 
+        if self.hop_len * (self.frame_num + 1) % self.resolution != 0:
+            raise ValueError('ERROR: LABEL AND RESOLUTION IS NOT MATCHED!')
+        label_number = tf.cast(tf.math.ceil((self.frame_num + 1) / self.resolution), tf.int64) # batch 1개에 들어갈(transform 이후 512개의 frame) 레이블 길이 미리 계산
+        frame_len = (self.frame_num + 1) * self.hop_len
+        y_idx = tf.random.uniform((self.iters,), minval=0, maxval=self.Y.shape[0] - label_number, dtype=tf.int64)
+        x_idx = y_idx * tf.cast(self.X.shape[0] / self.Y.shape[0], dtype=y_idx.dtype)
+        x = tf.gather(self.X, [tf.range(i, i + frame_len) for i in x_idx]) # (sample, wave, chan)
+        y = tf.gather(self.Y, [tf.range(i, i + label_number) for i in y_idx]) # (sample, label, SED+DOA)
+        for sample_preprocess in self.sample_preprocessing:
+            (x, y) = tf.map_fn(sample_preprocess, (x, y), 
+                             fn_output_signature=(tf.TensorSpec(shape=(x.shape[1], x.shape[2]), dtype=x.dtype), 
+                                                  tf.TensorSpec(shape=(y.shape[1], y.shape[2]), dtype=y.dtype)))
+        import pdb; pdb.set_trace()
+        trainset = tf.data.Dataset.from_tensor_slices((x, y))
 
         print('sample_preprocessing')
         for pre in self.sample_preprocessing:
@@ -392,17 +415,52 @@ class Pipline_Trainset_Dataloader:
 
         return trainset.prefetch(tf.data.AUTOTUNE)
 
-    def get_mono_audio(self):
-        class_num = self.y.shape[-1] // 4
-        idx = tf.where(tf.reduce_sum(self.y[...,:class_num], -1) == 1)[...,0]
-        mono_y = tf.gather(self.y, idx)
-        x_idx = [x for y in [list(range(i, i+self.resolution)) for i in idx] for x in y]
-        mono_x = tf.gather(self.x, idx)
-        return mono_x, mono_y
+    def get_mono_y_idx(self):
+        idx = tf.where(tf.reduce_sum(tf.reshape(self.y[...,:self.class_num], [-1, self.class_num]), -1) == 1)[...,0]
+        return idx
 
+    def EMDA(self, y_idx, sr=24000):
+        # raw_x, raw_y : mono class sound
+        equilizer = biquad_equilizer(self.sr)
+        def _EMDA(inputs):
+            wave_resolution = self.X.shape[0] // self.Y.shape[0]
+            x, y = inputs
+            # x = (wave, chan), y = (label_len, SED+DOA)
+            
+            y_frame_size = tf.random.uniform([1], maxval=y.shape[0], dtype=tf.int32)[0] # y에 넣을 frame 크기 구하기
+            y_offset = tf.random.uniform([1], maxval=y.shape[0] - y_frame_size, dtype=tf.int32)[0] # 프레임 크기를 고려하여 offset 설정
+            mono_y_frame_size = y_frame_size
+            mono_y_offset = tf.random.uniform([1], maxval=self.Y.shape[0] - mono_y_frame_size, dtype=tf.int32)[0]
+
+            x_frame_size = y_frame_size * wave_resolution
+            x_offset = y_offset * wave_resolution
+            mono_x_frame_size = x_frame_size
+            mono_x_offset = mono_y_offset * wave_resolution
+
+            mono_y_frame = self.Y[mono_y_offset:mono_y_offset + mono_y_frame_size]
+            y_frame_offset = tf.random.uniform([1], maxval=y.shape[0] - tf.shape(mono_y_frame)[0], dtype=tf.int32)[0]
+            mono_y_frame = tf.pad(mono_y_frame, ((y_frame_offset, y.shape[0] - y_frame_offset - tf.shape(mono_y_frame)[0]),(0,0)))
+            mono_y_frame = tf.reshape(mono_y_frame, [*y.shape])
+            
+            mono_x_frame = self.X[mono_x_offset:mono_x_offset + mono_x_frame_size]
+            x_frame_offset = y_frame_offset * wave_resolution
+            mono_x_frame = tf.pad(mono_x_frame, ((x_frame_offset, x.shape[0] - x_frame_offset - tf.shape(mono_x_frame)[0]),(0,0)))
+            mono_x_frame = tf.reshape(mono_x_frame, [*x.shape])
+            mono_x_frame = equilizer(mono_x_frame)
+            
+            sampled_x_frame = equilizer(x)
+            # class number in same frame constraint
+            cond = tf.reduce_sum(tf.cast((y[...,:self.class_num] + mono_y_frame[...,:self.class_num]) < 2, tf.float32), -1) == self.class_num # 합성 후 같은 class가 같은 frame에 존재하는 지 여부 탐색
+            cond = tf.logical_and(cond, tf.reduce_sum(y[..., :self.class_num], -1) < 2) # 원래 class가 2개 미만인 프레임만 합성
+            y = tf.where(cond[..., tf.newaxis], x=y + mono_y_frame, y=y)
+            
+            ratio = tf.random.uniform([1], minval=1e-3, maxval=1 - 1e-3)[0]
+            x = tf.where(tf.repeat(cond, wave_resolution)[:x.shape[0], tf.newaxis], x=ratio * sampled_x_frame + (1 - ratio) * mono_x_frame, y=x)
+            return x, y
+        return _EMDA
 
 if __name__ == '__main__':
-    path = '/root/datasets/DCASE2021_test/feat_label/'
+    path = '/root/datasets/DCASE2021'
     sample_preprocessing = []
     batch_preprocessing = [spec_augment]
     trainsetloader = Pipline_Trainset_Dataloader(path, batch=256, sample_preprocessing=sample_preprocessing, batch_preprocessing=batch_preprocessing)
