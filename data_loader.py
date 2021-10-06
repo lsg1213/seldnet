@@ -379,40 +379,28 @@ class Pipline_Trainset_Dataloader:
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
         self.sample_preprocessing.append(self.EMDA)
-        self.preprocess_batch = 1
 
-    def get_x_from_y(self, y, resolution):
+    def get_x_from_y(self, y, resolution): # 97769~97779 이상
         pad = tf.pad(tf.range(0, self.resolution, dtype=self.mono_y_idx.dtype)[tf.newaxis,...], ((1,0),(0,0)))[tf.newaxis, ...]
         out = tf.reshape(tf.transpose(y[...,tf.newaxis] * [[[1], [resolution]]] + pad, (0,2,1)), [-1, y.shape[-1]])
         return out
 
-    def get_data(self):
-        sample_num = tf.random.uniform((self.preprocess_batch,), minval=0, maxval=self.x.shape[0], dtype=tf.int64)
-        label_offset = tf.random.uniform((self.preprocess_batch,), minval=0, maxval=self.y.shape[1] - self.label_num, dtype=tf.int64)
-
-        @tf.function
-        def get_and_pad(inputs):
-            sample_num, label_offset = inputs
-            feature_offset = label_offset * self.resolution
-            x = self.x[sample_num][feature_offset: feature_offset + self.frame_num] # (frame, freq, chan)
-            y = self.y[sample_num][label_offset:label_offset + self.label_num] # (frame_label, SED+DOA)
-            # if label_offset >= self.y.shape[1] - self.label_num:
-            #     x = tf.concat([x, self.x[(sample_num + 1) % self.x.shape[0]][:self.frame_num - x.shape[0]]], 0)
-            #     y = tf.concat([y, self.y[(sample_num + 1) % self.y.shape[0]][:self.label_num - y.shape[0]]], 0)
-            return x, y
-        x, y = tf.map_fn(get_and_pad, (sample_num, label_offset), dtype=(tf.int64, tf.int64, tf.int64), fn_output_signature=
-                        (tf.TensorSpec((self.frame_num, self.x.shape[-2], self.x.shape[-1]), dtype=self.x.dtype),
-                        tf.TensorSpec((self.label_num, self.y.shape[-1]), dtype=self.y.dtype)))
-        return x, y
-
     def data_generator(self):
         from tqdm import tqdm
-        for i in tqdm(range(self.iters // self.preprocess_batch)):
-            x, y = self.get_data()
+        for i in tqdm(range(self.iters)):
+            sample_num = tf.random.uniform((), minval=0, maxval=self.x.shape[0], dtype=tf.int64)
+            label_offset = tf.random.uniform((), minval=0, maxval=self.y.shape[1], dtype=tf.int64)
+            feature_offset = label_offset * self.resolution
+
+            x = self.x[sample_num][feature_offset: feature_offset + self.frame_num] # (frame, freq, chan)
+            y = self.y[sample_num][label_offset:label_offset + self.label_num] # (frame_label, SED+DOA)
+            if label_offset >= self.y.shape[1] - self.label_num:
+                x = tf.concat([x, self.x[(sample_num + 1) % self.x.shape[0]][:self.frame_num - x.shape[0]]], 0)
+                y = tf.concat([y, self.y[(sample_num + 1) % self.y.shape[0]][:self.label_num - y.shape[0]]], 0)
+
             for sample_preprocess in self.sample_preprocessing:
                 x, y = sample_preprocess(x, y)
-            for x_, y_ in zip(x, y):
-                yield x_, y_
+            yield x, y
 
     def __next__(self):
         trainset = tf.data.Dataset.from_generator(self.data_generator, output_types=(tf.float32, tf.float32), 
@@ -431,8 +419,9 @@ class Pipline_Trainset_Dataloader:
         #     print(time() - st)
         #     import pdb; pdb.set_trace()
         from time import time
-        trainset.cache().prefetch(AUTOTUNE)
         st = time()
+        trainset.cache().prefetch(AUTOTUNE)
+        print('caching 시간', time() - st)
         [None for x,y in trainset]
         print('총 시간', time() - st)
         import pdb; pdb.set_trace()
@@ -448,8 +437,7 @@ class Pipline_Trainset_Dataloader:
         return idx
 
     @tf.function
-    def _EMDA(self, inputs):
-        x, y = inputs
+    def _EMDA(self, x, y):
         y_frame_size = tf.random.uniform((), minval=1, maxval=y.shape[0], dtype=tf.int32) # y에 넣을 frame 크기 구하기
         y_offset = tf.random.uniform((), maxval=y.shape[0] - y_frame_size, dtype=tf.int32) # 프레임 크기를 고려하여 offset 설정
         mono_y_frame_size = y_frame_size
@@ -474,10 +462,10 @@ class Pipline_Trainset_Dataloader:
         return mono_x_frame, mono_y_frame
 
     def EMDA(self, x, y):
-        # x: (batch for preprocess, frame, freq, chan)
-        # y: (batch for preprocess, frame_label, SED+DOA)
+        # x: (frame, freq, chan)
+        # y: (frame_label, SED+DOA)
 
-        mono_x_frame, mono_y_frame = tf.map_fn(self._EMDA, (x, y), dtype=(self.x.dtype, self.y.dtype))
+        mono_x_frame, mono_y_frame = self._EMDA(x, y)
         # equilizer가 완성되면 사용
         sampled_x_frame = x
         # mono_x_frame = self.equilizer(mono_x_frame)
@@ -488,12 +476,12 @@ class Pipline_Trainset_Dataloader:
         cond = tf.logical_and(cond, tf.reduce_sum(y[..., :self.class_num], -1) < 2) # 원래 class가 2개 미만인 프레임만 합성
         y = tf.where(cond[..., tf.newaxis], x=y + mono_y_frame, y=y)
         
-        ratio = tf.random.uniform((self.preprocess_batch,1,1,1), minval=1e-3, maxval=1 - 1e-3)
+        ratio = tf.random.uniform((), minval=1e-3, maxval=1 - 1e-3)
         sampled_x_frame = sampled_x_frame.numpy()
         sampled_x_frame.real *= ratio
         mono_x_frame = mono_x_frame.numpy()
         mono_x_frame.real *= (1 - ratio)
-        x = tf.where(tf.repeat(cond, self.resolution, -1)[:, :x.shape[1], tf.newaxis, tf.newaxis], x=sampled_x_frame + mono_x_frame, y=x)
+        x = tf.where(tf.repeat(cond, self.resolution)[:x.shape[0], tf.newaxis, tf.newaxis], x=sampled_x_frame + mono_x_frame, y=x)
         return x, y
 
 if __name__ == '__main__':
