@@ -365,7 +365,8 @@ def main(config):
     n_classes = 12
 
     # data load
-    trainset = get_dataset(config, 'train')
+    # trainset = get_dataset(config, 'train')
+    trainsetloader = Pipline_Trainset_Dataloader(path, batch=32, sample_preprocessing=sample_preprocessing, batch_preprocessing=batch_preprocessing)
     valset = get_dataset(config, 'val')
     testset = get_dataset(config, 'test')
 
@@ -422,12 +423,13 @@ def main(config):
         test_xs, test_ys, evaluator, config.batch*4, writer=writer)
 
     for epoch in range(config.epoch):
+        trainset = next(trainsetloader)
         if epoch == swa_start_epoch:
             tf.keras.backend.set_value(optimizer.lr, config.lr * 0.5)
 
         if epoch % 10 == 0:
             evaluate_fn(model, epoch)
-
+            
         # train loop
         train_iterloop(model, trainset, epoch, optimizer)
         score = val_iterloop(model, valset, epoch)

@@ -273,50 +273,6 @@ def gcc_features_tf(complex_specs, n_mels):
     return tf.stack(gcc_feat, axis=0)
 
 
-def get_preprocessed_x(wav, sample_rate, mode='foa', n_mels=64,
-                       multiplier=5, max_label_length=600, **kwargs):
-    device = get_device()
-    melscale = torchaudio.transforms.MelScale(
-        n_mels=n_mels, sample_rate=sample_rate).to(device)
-    spec = complex_spec(wav.to(device), **kwargs)
-
-    mel_spec = torchaudio.functional.complex_norm(spec, power=2.)
-    mel_spec = melscale(mel_spec)
-    mel_spec = torchaudio.functional.amplitude_to_DB(
-        mel_spec,
-        multiplier=10.,
-        amin=1e-10,
-        db_multiplier=np.log10(max(1., 1e-10)), # log10(max(ref, amin))
-        top_db=80.,
-    )
-
-    features = [mel_spec]
-    if mode == 'foa':
-        foa = foa_intensity_vectors(spec)
-        foa = melscale(foa)
-        features.append(foa)
-    elif mode == 'mic':
-        gcc = gcc_features(spec, n_mels=n_mels)
-        features.append(gcc)
-    else:
-        raise ValueError('invalid mode')
-
-    features = torch.cat(features, axis=0)
-
-    # [chan, freq, time] -> [time, freq, chan]
-    features = torch.transpose(features, 0, 2)
-    cur_len = features.shape[0]
-    max_len = max_label_length * multiplier
-    if cur_len < max_len: 
-        features = np.pad(features, 
-                          ((0, max_len-cur_len), (0,0), (0,0)),
-                          'constant')
-    else:
-        features = features[:max_len]
-
-    return features
-
-
 def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
                           multiplier=5, max_label_length=600, win_length=1024,
                           hop_length=480, n_fft=1024):
@@ -379,6 +335,7 @@ class Pipline_Trainset_Dataloader:
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
         self.sample_preprocessing.append(self.EMDA)
+        self.batch_preprocessing.append(spec_augment)
 
     @tf.function
     def get_x_from_y(self, y, resolution): # 97769~97779 이상
