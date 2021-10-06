@@ -21,6 +21,7 @@ def radian_to_degree(radian):
 
 
 # https://github.com/DemisEom/SpecAugment/blob/master/SpecAugment/spec_augment_tensorflow.py
+@tf.function
 def frequency_masking(mel_spectrogram, frequency_masking_para=27, frequency_mask_num=2):
     """Spec augmentation Calculation Function.
     'SpecAugment' have 3 steps for audio data augmentation.
@@ -52,6 +53,7 @@ def frequency_masking(mel_spectrogram, frequency_masking_para=27, frequency_mask
     return tf.cast(mel_spectrogram, dtype=tf.float32)
 
 
+@tf.function
 def time_masking(mel_spectrogram, y, tau, time_masking_para=100, time_mask_num=2):
     """Spec augmentation Calculation Function.
     'SpecAugment' have 3 steps for audio data augmentation.
@@ -105,27 +107,26 @@ def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9])
     Q: Q-factor
     '''
     def _band_biquad_equilizer(wav):
-        gain = tf.random.uniform([1], minval=g[0], maxval=g[1])[0]
-        central_frequency = tf.random.uniform([1], minval=central_freq[0], maxval=central_freq[1])[0]
-        Qfactor = tf.random.uniform([1], minval=Q[0], maxval=Q[1])[0]
+        gain = tf.random.uniform((), minval=g[0], maxval=g[1])
+        central_frequency = tf.random.uniform((), minval=central_freq[0], maxval=central_freq[1])
+        Qfactor = tf.random.uniform((), minval=Q[0], maxval=Q[1])
 
         # wav *= gain
 
         w0 = 2 * np.math.pi * central_frequency / sampling_rate
-        bw_Hz = central_frequency / Qfactor
+        A = tf.exp(gain / 40.0 * tf.math.log(10))
+        alpha = tf.sin(w0) / 2 / Q
 
-        a0 = tf.constant(1.0, dtype=wav.dtype)
-        a2 = tf.exp(-2 * np.math.pi * bw_Hz / sampling_rate)
-        a1 = -4 * a2 / (1 + a2) * tf.cos(w0)
-
-        b0 = tf.sqrt(1 - a1 * a1 / (4 * a2)) * (1 - a2)
-
-        b1 = tf.constant(0., dtype=wav.dtype)
-        b2 = tf.constant(0., dtype=wav.dtype)
+        b0 = 1 + alpha * A
+        b1 = -2 * tf.cos(w0)
+        b2 = 1 - alpha * A
+        a0 = 1 + alpha / A
+        a1 = -2 * tf.cos(w0)
+        a2 = 1 - alpha / A
         return biquad(wav, b0, b1, b2, a0, a1, a2)
 
     def biquad(wav, b0, b1, b2, a0, a1, a2):
-        return lfilter(wav, tf.concat([a0, a1, a2], 0), tf.concat([b0, b1, b2], 0))
+        return lfilter(wav, tf.stack([a0, a1, a2], 0), tf.stack([b0, b1, b2], 0))
 
     def lfilter(wav, a_coeffs, b_coeffs):
         dtype = wav.dtype
@@ -135,9 +136,23 @@ def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9])
     return _band_biquad_equilizer
 
 
+def stft(wav):
+    wav = tf.transpose(wav, [1,0])
+    out = tf.signal.stft(wav, 480, 240, 480, pad_end=True)
+    return out
+
+
 if __name__ == '__main__':
+    from data_loader import load_wav_and_label
     import tensorflow as tf
-    aa = tf.random.uniform([300,3])
-    bb = biquad_equilizer(24000)(aa)
-    import pdb; pdb.set_trace()
-    print()
+    import numpy as np
+    from tqdm import tqdm
+    path = '/root/datasets/DCASE2021'
+    x, y, sr = load_wav_and_label(os.path.join(path, 'foa_dev'),
+                             os.path.join(path, 'metadata_dev'),
+                             mode='train')
+    x = np.stack([stft(i).numpy() for i in tqdm(x)], 0)
+    y = np.stack(y, 0)
+    joblib.dump(x, os.path.join(path, 'foa_dev_stft_480.joblib'))
+    joblib.dump(y, os.path.join(path, 'foa_dev_label.joblib'))
+
