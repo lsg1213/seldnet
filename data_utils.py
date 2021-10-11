@@ -99,22 +99,20 @@ def spec_augment(x, y):
     return x, y
     
 
-def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9]):
+def biquad_equalizer(sampling_rate, central_freq=[100., 6000.], g=[-8.,8.], Q=[1.,9.]):
     '''
     central_freq: central frequency
     g: gain
     Q: Q-factor
     '''
-    def _band_biquad_equilizer(wav):
+    def _band_biquad_equalizer(feat):
         gain = tf.random.uniform((), minval=g[0], maxval=g[1])
         central_frequency = tf.random.uniform((), minval=central_freq[0], maxval=central_freq[1])
         Qfactor = tf.random.uniform((), minval=Q[0], maxval=Q[1])
 
-        # wav *= gain
-
         w0 = 2 * np.math.pi * central_frequency / sampling_rate
-        A = tf.exp(gain / 40.0 * tf.math.log(10))
-        alpha = tf.sin(w0) / 2 / Q
+        A = tf.exp(gain / 40.0 * tf.math.log(10.))
+        alpha = tf.sin(w0) / 2 / Qfactor
 
         b0 = 1 + alpha * A
         b1 = -2 * tf.cos(w0)
@@ -122,17 +120,15 @@ def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9])
         a0 = 1 + alpha / A
         a1 = -2 * tf.cos(w0)
         a2 = 1 - alpha / A
-        return biquad(wav, b0, b1, b2, a0, a1, a2)
 
-    def biquad(wav, b0, b1, b2, a0, a1, a2):
-        return lfilter(wav, tf.stack([a0, a1, a2], 0), tf.stack([b0, b1, b2], 0))
+        frf = tf.cast(ss.freqz(tf.stack([b0, b1, b2], 0), tf.stack([a0, a1, a2], 0), worN=feat.shape[0])[1][..., np.newaxis, np.newaxis], feat.dtype)
+        return biquad(feat, frf)
 
-    def lfilter(wav, a_coeffs, b_coeffs):
-        dtype = wav.dtype
-        # (time, chan)
-        wav = ss.filtfilt(b_coeffs, a_coeffs, wav, axis=0)
-        return tf.cast(tf.clip_by_value(wav, -1., 1.), dtype=dtype)
-    return _band_biquad_equilizer
+    @tf.function
+    def biquad(feat, frf):
+        return feat * frf
+    
+    return _band_biquad_equalizer
 
 @tf.function
 def stft(wav):

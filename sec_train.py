@@ -253,7 +253,8 @@ def generate_iterloop(criterion, evaluator, writer,
                     status = OrderedDict({
                         'mode': mode,
                         'epoch': epoch,
-                        'lr': optimizer.learning_rate.numpy(), 
+                        'lr': optimizer.learning_rate.numpy(),
+                        'loss': losses.result().numpy(),
                         'ER': metric_values[0].numpy(),
                         'F': metric_values[1].numpy(),
                         'DER': metric_values[2].numpy(),
@@ -264,6 +265,7 @@ def generate_iterloop(criterion, evaluator, writer,
                     status = OrderedDict({
                     'mode': mode,
                     'epoch': epoch,
+                    'loss': losses.result().numpy(),
                     'ER': metric_values[0].numpy(),
                     'F': metric_values[1].numpy(),
                     'DER': metric_values[2].numpy(),
@@ -325,7 +327,7 @@ def get_test_dataset(config):
         return tf.signal.frame(data, frame_num, hop_len, axis=0, pad_end=True).numpy()
     
     x = np.stack(list(map(frame, x)), 0)
-    x = np.concatenate([x.real, x.imag], -1)
+    # x = np.concatenate([x.real, x.imag], -1)
 
     def generator(x, y):
         def _generator():
@@ -334,10 +336,11 @@ def get_test_dataset(config):
         return _generator
 
     dataset = tf.data.Dataset.from_generator(generator(x, y), output_signature=(
-        tf.TensorSpec((x.shape[1], frame_num, x.shape[-2], x.shape[-1]), dtype=x.dtype),
+        tf.TensorSpec((x.shape[1], frame_num, x.shape[-2], None), dtype=x.dtype),
         tf.TensorSpec((y.shape[1], y.shape[-1]), dtype=y.dtype)
     ))
     # dataset = dataset.batch(config.batch, drop_remainder=False)
+    dataset = dataset.map(get_intensity_vector)
     dataset = dataset.map(split_total_labels_to_sed_doa)
 
     return dataset.prefetch(tf.data.experimental.AUTOTUNE)
@@ -357,7 +360,7 @@ def get_val_dataset(config):
     x = np.pad(x, ((0, frame_num - (x.shape[0] % frame_num)), (0,0), (0,0)))
     # frame_size 520, frame step 512
     x = x.reshape((-1, frame_num, x.shape[-2], x.shape[-1]))[:,:frame_len]
-    x = np.concatenate([x.real, x.imag], -1)
+    # x = np.concatenate([x.real, x.imag], -1)
     y = np.pad(y, ((0, label_num - (y.shape[0] % label_num)),(0,0)))
     y = y.reshape((-1,label_num, y.shape[-1]))
 
@@ -368,9 +371,10 @@ def get_val_dataset(config):
         return _generator
 
     dataset = tf.data.Dataset.from_generator(generator(x, y), output_signature=(
-        tf.TensorSpec((frame_len, x.shape[-2], x.shape[-1]), dtype=x.dtype),
+        tf.TensorSpec((frame_len, x.shape[-2], None), dtype=x.dtype),
         tf.TensorSpec((label_num, y.shape[-1]), dtype=y.dtype)
     ))
+    dataset = dataset.map(get_intensity_vector)
     dataset = dataset.batch(config.batch, drop_remainder=False)
     dataset = dataset.map(split_total_labels_to_sed_doa)
 

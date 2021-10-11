@@ -315,10 +315,27 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
     return features
 
 
+@tf.function
+def get_intensity_vector(x, y):
+    eps = 1e-6
+    if x.dtype not in [tf.complex64, tf.complex128]:
+        raise TypeError('x must be complex number')
+    IVx = tf.math.real(tf.math.conj(x[..., 0]) * x[..., 3])
+    IVy = tf.math.real(tf.math.conj(x[..., 0]) * x[..., 1])
+    IVz = tf.math.real(tf.math.conj(x[..., 0]) * x[..., 2])
+
+    normal = eps + (tf.math.abs(x[..., 0])**2 + tf.math.abs(x[..., 1])**2 + tf.math.abs(x[..., 2])**2 + tf.math.abs(x[..., 3])**2)/2.
+    IVx /= normal
+    IVy /= normal
+    IVz /= normal
+
+    foa_iv = tf.stack((IVx, IVy, IVz), -1)
+    return tf.concat([tf.math.real(x), foa_iv], -1), y
+
+
 class Pipline_Trainset_Dataloader:
     def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
         self.x = joblib.load(os.path.join(path, 'foa_dev_train_stft_480.joblib')) # (sample_num, frame_num, freqs, chan)
-        self.x = self.get_intensity_vector()
         self.y = joblib.load(os.path.join(path, 'foa_dev_train_label.joblib')) # (sample_num, label_frame_num, SED+DOA)
         self.sr = 24000
         if self.x.shape[0] % self.y.shape[0] != 0:
@@ -332,25 +349,11 @@ class Pipline_Trainset_Dataloader:
         self.batch = batch
         self.mel_bin = 64
         self.resolution = self.x.shape[-3] // self.y.shape[-2]
-        self.equilizer = biquad_equilizer(self.sr)
+        self.equalizer = biquad_equalizer(self.sr)
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
-        self.sample_preprocessing.append(self.EMDA)
-
-    def get_intensity_vector(self, eps=1e-6):
-        IVx = np.real(np.conj(self.x[..., 0]) * self.x[..., 3])
-        IVy = np.real(np.conj(self.x[..., 0]) * self.x[..., 1])
-        IVz = np.real(np.conj(self.x[..., 0]) * self.x[..., 2])
-
-        normal = eps + (np.abs(self.x[..., 0])**2 + np.abs(self.x[..., 1])**2 + np.abs(self.x[..., 2])**2 + np.abs(self.x[..., 3])**2)/2.
-        #normal = np.sqrt(IVx**2 + IVy**2 + IVz**2) + self._eps
-        IVx /= normal
-        IVy /= normal
-        IVz /= normal
-
-        # we are doing the following instead of simply concatenating to keep the processing similar to mel_spec and gcc
-        foa_iv = np.stack((IVx, IVy, IVz), -1)
-        self.x = np.concatenate([self.x.real, foa_iv], -1)
+        # self.sample_preprocessing.append(self.EMDA)
+        self.sample_preprocessing.append(get_intensity_vector)
 
     @tf.function
     def get_x_from_y(self, y, resolution):
@@ -376,21 +379,20 @@ class Pipline_Trainset_Dataloader:
 
     def __next__(self):
         trainset = tf.data.Dataset.from_generator(self.data_generator, output_types=(tf.float32, tf.float32), 
-                    output_shapes=([self.frame_num] + [*self.x.shape[2:]], [self.label_num] + [*self.y.shape[2:]]))
+                    output_shapes=([self.frame_num] + [*self.x.shape[2:-1]] + [None], [self.label_num] + [*self.y.shape[2:]]))
 
         trainset = trainset.batch(self.batch)
         print('batch_preprocessing')
         for pre in self.batch_preprocessing:
             trainset = trainset.map(pre)
 
-        return trainset.prefetch(tf.data.AUTOTUNE)
+        return trainset.prefetch(tf.data.AUTOTUNE).cache()
 
     @tf.function
     def get_mono_y_idx(self):
         idx = tf.cast(tf.where(tf.reduce_sum(self.y[...,:self.class_num], -1) == 1), tf.int64)
         return idx
 
-    # @tf.function
     def get_mono_frame(self, x, y):
         y_frame_size = tf.random.uniform((), minval=1, maxval=y.shape[0], dtype=tf.int32) # y에 넣을 frame 크기 구하기
         mono_y_frame_size = y_frame_size
@@ -412,20 +414,15 @@ class Pipline_Trainset_Dataloader:
 
     @tf.function
     def filtering(self, x, y, mono_x_frame, mono_y_frame):
+        # x = (stft feature(window, freq, 4), complex64)
         cond = tf.reduce_sum(tf.cast((y[...,:self.class_num] + mono_y_frame[...,:self.class_num]) < 2, tf.float32), -1) == self.class_num # 합성 후 같은 class가 같은 frame에 존재하는 지 여부 탐색
         cond = tf.logical_and(cond, tf.reduce_sum(y[..., :self.class_num], -1) < 2) # 원래 class가 2개 미만인 프레임만 합성
         y = tf.where(cond[..., tf.newaxis], x=y + mono_y_frame, y=y)
         cond = tf.repeat(cond, self.resolution)[:x.shape[0], tf.newaxis, tf.newaxis]
         
         ratio = tf.random.uniform((), minval=1e-3, maxval=1 - 1e-3)
-        ratio = tf.repeat(ratio, 4)
-        ratio = tf.concat([ratio, tf.ones_like(ratio)], -1)
-        x *= ratio
-        mono_x_frame *= (1 - ratio)
-        # x = tf.complex(tf.math.real(x) * ratio, tf.math.imag(x))
-
-        # mono_x_frame = tf.complex(tf.math.real(mono_x_frame) * (1 - ratio), tf.math.imag(mono_x_frame))
-
+        x = tf.complex(tf.math.real(x) * ratio, tf.math.imag(x))
+        mono_x_frame = tf.complex(tf.math.real(mono_x_frame) * (1 - ratio), tf.math.imag(mono_x_frame))
         x = tf.where(cond, x=mono_x_frame + x, y=x)
         return x, y
 
@@ -437,8 +434,8 @@ class Pipline_Trainset_Dataloader:
         mono_x_frame, mono_y_frame = self.get_mono_frame(x, y)
 
         # equilizer가 완성되면 사용
-        # mono_x_frame = self.equilizer(mono_x_frame)
-        # x = self.equilizer(x)
+        mono_x_frame = self.equalizer(mono_x_frame)
+        x = self.equalizer(x)
 
         # class number in same frame constraint
         x, y = self.filtering(x, y, mono_x_frame, mono_y_frame)
@@ -446,21 +443,22 @@ class Pipline_Trainset_Dataloader:
         
 
 if __name__ == '__main__':
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    print(gpus)
-    if gpus:
-        try:
-            tf.config.experimental.set_virtual_device_configuration(
-                gpus[0],
-                [tf.config.experimental.VirtualDeviceConfiguration(
-                    memory_limit=20000)])
-        except RuntimeError as e:
-            print(e)
+    # gpus = tf.config.experimental.list_physical_devices('GPU')
+    # print(gpus)
+    # if gpus:
+    #     try:
+    #         tf.config.experimental.set_virtual_device_configuration(
+    #             gpus[0],
+    #             [tf.config.experimental.VirtualDeviceConfiguration(
+    #                 memory_limit=20000)])
+    #     except RuntimeError as e:
+    #         print(e)
     path = '/root/datasets/DCASE2021'
     sample_preprocessing = []
     batch_preprocessing = [spec_augment]
     trainsetloader = Pipline_Trainset_Dataloader(path, batch=32, sample_preprocessing=sample_preprocessing, batch_preprocessing=batch_preprocessing)
     trainset = next(trainsetloader)
+    [None for _ in trainset]
     import pdb; pdb.set_trace()
     
  
