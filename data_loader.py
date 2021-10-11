@@ -318,7 +318,7 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
 class Pipline_Trainset_Dataloader:
     def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
         self.x = joblib.load(os.path.join(path, 'foa_dev_train_stft_480.joblib')) # (sample_num, frame_num, freqs, chan)
-        self.x = np.concatenate([self.x.real, self.x.imag], -1)
+        self.x = self.get_intensity_vector()
         self.y = joblib.load(os.path.join(path, 'foa_dev_train_label.joblib')) # (sample_num, label_frame_num, SED+DOA)
         self.sr = 24000
         if self.x.shape[0] % self.y.shape[0] != 0:
@@ -336,6 +336,21 @@ class Pipline_Trainset_Dataloader:
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
         self.sample_preprocessing.append(self.EMDA)
+
+    def get_intensity_vector(self, eps=1e-6):
+        IVx = np.real(np.conj(self.x[..., 0]) * self.x[..., 3])
+        IVy = np.real(np.conj(self.x[..., 0]) * self.x[..., 1])
+        IVz = np.real(np.conj(self.x[..., 0]) * self.x[..., 2])
+
+        normal = eps + (np.abs(self.x[..., 0])**2 + np.abs(self.x[..., 1])**2 + np.abs(self.x[..., 2])**2 + np.abs(self.x[..., 3])**2)/2.
+        #normal = np.sqrt(IVx**2 + IVy**2 + IVz**2) + self._eps
+        IVx /= normal
+        IVy /= normal
+        IVz /= normal
+
+        # we are doing the following instead of simply concatenating to keep the processing similar to mel_spec and gcc
+        foa_iv = np.stack((IVx, IVy, IVz), -1)
+        self.x = np.concatenate([self.x.real, foa_iv], -1)
 
     @tf.function
     def get_x_from_y(self, y, resolution):
