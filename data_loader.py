@@ -317,8 +317,8 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
 
 class Pipline_Trainset_Dataloader:
     def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
-        self.x = tf.convert_to_tensor(joblib.load(os.path.join(path, 'foa_dev_stft_480.joblib'))) # (sample_num, frame_num, freqs, chan)
-        self.y = tf.convert_to_tensor(joblib.load(os.path.join(path, 'foa_dev_label.joblib'))) # (sample_num, label_frame_num, SED+DOA)
+        self.x = joblib.load(os.path.join(path, 'foa_dev_train_stft_480.joblib')) # (sample_num, frame_num, freqs, chan)
+        self.y = joblib.load(os.path.join(path, 'foa_dev_train_label.joblib')) # (sample_num, label_frame_num, SED+DOA)
         self.sr = 24000
         if self.x.shape[0] % self.y.shape[0] != 0:
             raise ValueError('data resolution is wrong')
@@ -334,8 +334,8 @@ class Pipline_Trainset_Dataloader:
         self.equilizer = biquad_equilizer(self.sr)
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
-        self.sample_preprocessing.append(self.EMDA)
-        self.batch_preprocessing.append(spec_augment)
+        # self.sample_preprocessing.append(self.EMDA)
+        self.sample_preprocessing.insert(0, self.seperate_real_imag)
 
     @tf.function
     def get_x_from_y(self, y, resolution): # 97769~97779 이상
@@ -344,6 +344,11 @@ class Pipline_Trainset_Dataloader:
         return out
 
     @tf.function
+    def seperate_real_imag(self, x, y):
+        if x.dtype in [tf.complex64, tf.complex128]:
+            x = tf.concat([tf.math.real(x), tf.math.imag(x)], -1)
+        return x, y
+
     def get_sliced_data(self):
         sample_num = tf.random.uniform((), minval=0, maxval=self.x.shape[0], dtype=tf.int64)
         label_offset = tf.random.uniform((), minval=0, maxval=self.y.shape[1] - self.label_num, dtype=tf.int64)
@@ -357,23 +362,20 @@ class Pipline_Trainset_Dataloader:
         return x, y
 
     def data_generator(self):
-        from tqdm import tqdm
-        for i in tqdm(range(self.iters)):
+        for i in range(self.iters):
             x, y = self.get_sliced_data()
-
             for sample_preprocess in self.sample_preprocessing:
                 x, y = sample_preprocess(x, y)
             yield x, y
 
     def __next__(self):
         trainset = tf.data.Dataset.from_generator(self.data_generator, output_types=(tf.float32, tf.float32), 
-                    output_shapes=([self.frame_num] + [*self.x.shape[2:]], [self.label_num] + [*self.y.shape[2:]]))
+                    output_shapes=([self.frame_num] + [*self.x.shape[2:-1]] + [self.x.shape[-1] * 2], [self.label_num] + [*self.y.shape[2:]]))
 
         trainset = trainset.batch(self.batch)
-        [_ for _ in trainset]
         print('batch_preprocessing')
         for pre in self.batch_preprocessing:
-            trainset.map(pre)
+            trainset = trainset.map(pre)
 
         return trainset.prefetch(tf.data.AUTOTUNE)
 
@@ -429,7 +431,7 @@ class Pipline_Trainset_Dataloader:
         # x = self.equilizer(x)
 
         # class number in same frame constraint
-        cond, y = self.filtering(x, y, mono_x_frame, mono_y_frame)
+        x, y = self.filtering(x, y, mono_x_frame, mono_y_frame)
         return x, y
 
 if __name__ == '__main__':

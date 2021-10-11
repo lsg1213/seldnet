@@ -54,7 +54,7 @@ def frequency_masking(mel_spectrogram, frequency_masking_para=27, frequency_mask
 
 
 @tf.function
-def time_masking(mel_spectrogram, y, tau, time_masking_para=100, time_mask_num=2):
+def time_masking(x, y, tau, time_masking_para=100, time_mask_num=2):
     """Spec augmentation Calculation Function.
     'SpecAugment' have 3 steps for audio data augmentation.
     first step is time warping using Tensorflow's image_sparse_warp function.
@@ -68,36 +68,35 @@ def time_masking(mel_spectrogram, y, tau, time_masking_para=100, time_mask_num=2
     # Returns
       mel_spectrogram(numpy array): warped and masked mel spectrogram.
     """
-    fbank_size = tf.shape(mel_spectrogram)
+    fbank_size = tf.shape(x)
     n, v = fbank_size[1], fbank_size[2]
     axis = 1
-    resolution = fbank_size[1] // tf.shape(y)[1]
+    resolution = int(tf.math.ceil(fbank_size[1] / tf.shape(y)[1]))
 
     # Step 3 : Time masking
     for i in range(time_mask_num):
         t = tf.random.uniform([], minval=0, maxval=time_masking_para // resolution, dtype=tf.int32)
-        t0 = tf.random.uniform([], minval=0, maxval=tau // 5 - t, dtype=tf.int32)
+        t0 = tf.random.uniform([], minval=0, maxval=int(tf.math.ceil(tau / resolution)) - t, dtype=tf.int32)
 
-        # mel_spectrogram[:, t0:t0 + t] = 0
-        mask = tf.concat((tf.ones(shape=(1, n-t0-t, v, 1)),
+        # x[:, t0:t0 + t] = 0
+        mask = tf.concat((tf.ones(shape=(1, tf.shape(y)[1]-t0-t, v, 1)),
                           tf.zeros(shape=(1, t, v, 1)),
                           tf.ones(shape=(1, t0, v, 1)),
                           ), axis)
-        y *= mask
-        mel_spectrogram = mel_spectrogram * tf.repeat(mask, repeats=resolution, axis=axis)
-    return tf.cast(mel_spectrogram, dtype=tf.float32), y
+        y *= mask[:,:,:1,0]
+        x = x * tf.repeat(mask, repeats=resolution, axis=axis)[:,:x.shape[1]]
+    return tf.cast(x, dtype=tf.float32), y
 
 
 def spec_augment(x, y):
     # x = (batch, time, freq, chan)
-    mel_spectrogram = x
-    v = mel_spectrogram.shape[0]
-    tau = mel_spectrogram.shape[1]
+    v = x.shape[0]
+    tau = x.shape[1]
 
-    warped_frequency_spectrogram = frequency_masking(mel_spectrogram)
-    warped_frequency_time_sepctrogram, y = time_masking(warped_frequency_spectrogram, y, tau=tau)
+    x = frequency_masking(x)
+    x, y = time_masking(x, y, tau=tau)
 
-    return warped_frequency_time_sepctrogram, y
+    return x, y
     
 
 def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9]):
@@ -135,7 +134,7 @@ def biquad_equilizer(sampling_rate, central_freq=[100, 6000], g=[-8,8], Q=[1,9])
         return tf.cast(tf.clip_by_value(wav, -1., 1.), dtype=dtype)
     return _band_biquad_equilizer
 
-
+@tf.function
 def stft(wav):
     wav = tf.transpose(wav, [1,0])
     out = tf.signal.stft(wav, 480, 240, 480, pad_end=True)
@@ -144,15 +143,17 @@ def stft(wav):
 
 if __name__ == '__main__':
     from data_loader import load_wav_and_label
+    import joblib
     import tensorflow as tf
     import numpy as np
     from tqdm import tqdm
+    mode = 'test'
     path = '/root/datasets/DCASE2021'
     x, y, sr = load_wav_and_label(os.path.join(path, 'foa_dev'),
                              os.path.join(path, 'metadata_dev'),
-                             mode='train')
-    x = np.stack([stft(i).numpy() for i in tqdm(x)], 0)
+                             mode=mode)
+    x = np.stack([stft(i).numpy() for i in tqdm(x)], 0).transpose(0,2,3,1)
     y = np.stack(y, 0)
-    joblib.dump(x, os.path.join(path, 'foa_dev_stft_480.joblib'))
-    joblib.dump(y, os.path.join(path, 'foa_dev_label.joblib'))
+    joblib.dump(x, os.path.join(path, f'foa_dev_{mode}_stft_480.joblib'))
+    joblib.dump(y, os.path.join(path, f'foa_dev_{mode}_label.joblib'))
 
