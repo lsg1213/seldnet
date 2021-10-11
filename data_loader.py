@@ -318,6 +318,7 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
 class Pipline_Trainset_Dataloader:
     def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
         self.x = joblib.load(os.path.join(path, 'foa_dev_train_stft_480.joblib')) # (sample_num, frame_num, freqs, chan)
+        self.x = np.concatenate([self.x.real, self.x.imag], -1)
         self.y = joblib.load(os.path.join(path, 'foa_dev_train_label.joblib')) # (sample_num, label_frame_num, SED+DOA)
         self.sr = 24000
         if self.x.shape[0] % self.y.shape[0] != 0:
@@ -334,20 +335,13 @@ class Pipline_Trainset_Dataloader:
         self.equilizer = biquad_equilizer(self.sr)
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
-        # self.sample_preprocessing.append(self.EMDA)
-        self.sample_preprocessing.insert(0, self.seperate_real_imag)
+        self.sample_preprocessing.append(self.EMDA)
 
     @tf.function
-    def get_x_from_y(self, y, resolution): # 97769~97779 이상
+    def get_x_from_y(self, y, resolution):
         pad = tf.pad(tf.range(0, self.resolution, dtype=self.mono_y_idx.dtype)[tf.newaxis,...], ((1,0),(0,0)))[tf.newaxis, ...]
         out = tf.reshape(tf.transpose(y[...,tf.newaxis] * [[[1], [resolution]]] + pad, (0,2,1)), [-1, y.shape[-1]])
         return out
-
-    @tf.function
-    def seperate_real_imag(self, x, y):
-        if x.dtype in [tf.complex64, tf.complex128]:
-            x = tf.concat([tf.math.real(x), tf.math.imag(x)], -1)
-        return x, y
 
     def get_sliced_data(self):
         sample_num = tf.random.uniform((), minval=0, maxval=self.x.shape[0], dtype=tf.int64)
@@ -356,9 +350,6 @@ class Pipline_Trainset_Dataloader:
 
         x = self.x[sample_num][feature_offset: feature_offset + self.frame_num] # (frame, freq, chan)
         y = self.y[sample_num][label_offset:label_offset + self.label_num] # (frame_label, SED+DOA)
-        # if label_offset >= self.y.shape[1] - self.label_num:
-        #     x = tf.concat([x, self.x[(sample_num + 1) % self.x.shape[0]][:self.frame_num - x.shape[0]]], 0)
-        #     y = tf.concat([y, self.y[(sample_num + 1) % self.y.shape[0]][:self.label_num - y.shape[0]]], 0)
         return x, y
 
     def data_generator(self):
@@ -370,7 +361,7 @@ class Pipline_Trainset_Dataloader:
 
     def __next__(self):
         trainset = tf.data.Dataset.from_generator(self.data_generator, output_types=(tf.float32, tf.float32), 
-                    output_shapes=([self.frame_num] + [*self.x.shape[2:-1]] + [self.x.shape[-1] * 2], [self.label_num] + [*self.y.shape[2:]]))
+                    output_shapes=([self.frame_num] + [*self.x.shape[2:]], [self.label_num] + [*self.y.shape[2:]]))
 
         trainset = trainset.batch(self.batch)
         print('batch_preprocessing')
@@ -379,25 +370,24 @@ class Pipline_Trainset_Dataloader:
 
         return trainset.prefetch(tf.data.AUTOTUNE)
 
+    @tf.function
     def get_mono_y_idx(self):
         idx = tf.cast(tf.where(tf.reduce_sum(self.y[...,:self.class_num], -1) == 1), tf.int64)
         return idx
 
-    @tf.function
+    # @tf.function
     def get_mono_frame(self, x, y):
         y_frame_size = tf.random.uniform((), minval=1, maxval=y.shape[0], dtype=tf.int32) # y에 넣을 frame 크기 구하기
-        y_offset = tf.random.uniform((), maxval=y.shape[0] - y_frame_size, dtype=tf.int32) # 프레임 크기를 고려하여 offset 설정
         mono_y_frame_size = y_frame_size
         mono_y_offset = tf.random.uniform((), maxval=self.mono_y_idx.shape[0] - mono_y_frame_size, dtype=tf.int32)
         x_frame_size = y_frame_size * self.resolution
-        x_offset = y_offset * self.resolution
         mono_x_frame_size = x_frame_size
-        mono_x_offset = mono_y_offset
+        mono_x_offset = mono_y_offset * self.resolution
 
         yy = self.mono_y_idx[mono_y_offset:mono_y_offset+mono_y_frame_size]
         xx = self.mono_x_idx[mono_x_offset:mono_x_offset+mono_x_frame_size]
-        mono_y_frame = tf.gather_nd(self.y, yy)
-        mono_x_frame = tf.gather_nd(self.x, xx)
+        mono_y_frame = self.y[yy.numpy()[:,0], yy.numpy()[:,1]]
+        mono_x_frame = self.x[xx.numpy()[:,0], xx.numpy()[:,1]]
 
         y_frame_offset = tf.random.uniform((), maxval=y.shape[0] - tf.shape(mono_y_frame)[0], dtype=tf.int32)
         mono_y_frame = tf.pad(mono_y_frame, ((y_frame_offset, y.shape[0] - y_frame_offset - tf.shape(mono_y_frame)[0]),(0,0)))
@@ -413,13 +403,18 @@ class Pipline_Trainset_Dataloader:
         cond = tf.repeat(cond, self.resolution)[:x.shape[0], tf.newaxis, tf.newaxis]
         
         ratio = tf.random.uniform((), minval=1e-3, maxval=1 - 1e-3)
-        x = tf.complex(tf.math.real(x) * ratio, tf.math.imag(x))
-        mono_x_frame = tf.complex(tf.math.real(mono_x_frame) * (1 - ratio), tf.math.imag(mono_x_frame))
+        ratio = tf.repeat(ratio, 4)
+        ratio = tf.concat([ratio, tf.ones_like(ratio)], -1)
+        x *= ratio
+        mono_x_frame *= (1 - ratio)
+        # x = tf.complex(tf.math.real(x) * ratio, tf.math.imag(x))
+
+        # mono_x_frame = tf.complex(tf.math.real(mono_x_frame) * (1 - ratio), tf.math.imag(mono_x_frame))
 
         x = tf.where(cond, x=mono_x_frame + x, y=x)
         return x, y
 
-    @tf.function
+    # @tf.function
     def EMDA(self, x, y):
         # x: (frame, freq, chan)
         # y: (frame_label, SED+DOA)
@@ -433,6 +428,7 @@ class Pipline_Trainset_Dataloader:
         # class number in same frame constraint
         x, y = self.filtering(x, y, mono_x_frame, mono_y_frame)
         return x, y
+        
 
 if __name__ == '__main__':
     gpus = tf.config.experimental.list_physical_devices('GPU')
