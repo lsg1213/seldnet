@@ -116,25 +116,25 @@ def single_lstm(inp, hidden_size, dropout=0., bidirectional=False):
 
 
 def DPRNN(inp, hidden_size, output_size, dropout=0, num_layers=1, bidirectional=True):
-    x = inp # B, dim1, dim2, N
-    output = inp
+    output = inp # B, dim1, dim2, N
     for i in range(num_layers):
         if i == num_layers - 1:
             hidden_size = output_size
-        dim1, dim2, N = x.shape[1:]
-        row_input = tf.keras.layers.Permute([2, 1, 3])(x) # B, dim2, dim1, N
+        dim1, dim2, N = output.shape[1:]
+        row_input = tf.keras.layers.Permute([2, 1, 3])(output) # B, dim2, dim1, N
         row_input = tf.reshape(row_input, [-1, dim1, N])
         row_output = single_lstm(row_input, hidden_size, dropout=dropout, bidirectional=bidirectional)
         row_output = tf.reshape(row_output, [-1,dim2,dim1,N])
         row_output = tf.keras.layers.Permute([2, 1, 3])(row_output)
         row_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(row_output)
+        output += row_output
         
-        col_input = tf.reshape(x, [-1, dim2, N])
+        col_input = tf.reshape(output, [-1, dim2, N])
         col_output = single_lstm(col_input, hidden_size, dropout=dropout, bidirectional=bidirectional)
         col_output = tf.reshape(col_output, [-1,dim1,dim2,N])
         col_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(col_output)
 
-        output += row_output + col_output
+        output += col_output
     return output # (B, dim1, dim2, output_size)
 
 
@@ -563,7 +563,7 @@ def main(config):
 if __name__=='__main__':
     main(args.parse_args())
     # os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-    # model = get_model([512, 241, 8])
+    # model = get_model([512, 241, 7])
     # from model_flop import get_flops
     # model.summary()
     # print(get_flops(model))
