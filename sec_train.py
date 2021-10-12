@@ -535,17 +535,18 @@ def main(config):
                 os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
                 include_optimizer=False)
         else:
-            if lr_decay_patience * config.iters >= config.lr_patience and config.decay != 1 and 50000 > config.iters * epoch:
-                print(f'iters: {epoch * config.iters}, lr: {optimizer.learning_rate.numpy():.5} -> {(optimizer.learning_rate * config.decay).numpy():.5}')
-                optimizer.learning_rate = optimizer.learning_rate * config.decay
-                lr_decay_patience = 0
+            if 50000 <= config.iters * epoch:
+                if lr_decay_patience * config.iters >= config.lr_patience and config.decay != 1:
+                    print(f'iters: {epoch * config.iters}, lr: {optimizer.learning_rate.numpy():.5} -> {(optimizer.learning_rate * config.decay).numpy():.5}')
+                    optimizer.learning_rate = optimizer.learning_rate * config.decay
+                    lr_decay_patience = 0
 
-            # if early_stop_patience == config.patience:
-            #     print(f'Early Stopping at {epoch * config.iters}, score is {score}')
-            #     break
-            # early_stop_patience += 1
-            lr_decay_patience += 1
-            print(f'lr_decay_patience: {lr_decay_patience}')
+                # if early_stop_patience == config.patience:
+                #     print(f'Early Stopping at {epoch * config.iters}, score is {score}')
+                #     break
+                # early_stop_patience += 1
+                lr_decay_patience += 1
+                print(f'lr_decay_patience: {lr_decay_patience}')
 
     # end of training
     print(f'iters: {epoch * config.iters}')
