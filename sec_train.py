@@ -108,10 +108,10 @@ def d3_block(inp, num_layers, growth_rate, n_blocks, kernel_size=3, pad=1, dilat
 
 def single_lstm(inp, hidden_size, dropout=0., bidirectional=False):
     if bidirectional:
-        x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(hidden_size, dropout=dropout, return_sequences=True))(inp)
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(hidden_size, dropout=dropout, return_sequences=True)))(inp)
     else:
-        x = tf.keras.layers.LSTM(hidden_size, dropout=dropout, return_sequences=True)(inp)
-    x = tf.keras.layers.Dense(inp.shape[-1])(x)
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.LSTM(hidden_size, dropout=dropout, return_sequences=True))(inp)
+    x = tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(inp.shape[-1]))(x)
     return x
 
 
@@ -120,18 +120,13 @@ def DPRNN(inp, hidden_size, output_size, dropout=0, num_layers=1, bidirectional=
     for i in range(num_layers):
         if i == num_layers - 1:
             hidden_size = output_size
-        dim1, dim2, N = output.shape[1:]
         row_input = tf.keras.layers.Permute([2, 1, 3])(output) # B, dim2, dim1, N
-        row_input = tf.reshape(row_input, [-1, dim1, N])
         row_output = single_lstm(row_input, hidden_size, dropout=dropout, bidirectional=bidirectional)
-        row_output = tf.reshape(row_output, [-1,dim2,dim1,N])
         row_output = tf.keras.layers.Permute([2, 1, 3])(row_output)
         row_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(row_output)
         output += row_output
         
-        col_input = tf.reshape(output, [-1, dim2, N])
-        col_output = single_lstm(col_input, hidden_size, dropout=dropout, bidirectional=bidirectional)
-        col_output = tf.reshape(col_output, [-1,dim1,dim2,N])
+        col_output = single_lstm(output, hidden_size, dropout=dropout, bidirectional=bidirectional)
         col_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(col_output)
 
         output += col_output
@@ -550,6 +545,7 @@ def main(config):
             #     break
             # early_stop_patience += 1
             lr_decay_patience += 1
+            print(f'lr_decay_patience: {lr_decay_patience}')
 
     # end of training
     print(f'iters: {epoch * config.iters}')

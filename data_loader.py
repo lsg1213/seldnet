@@ -320,11 +320,13 @@ def get_intensity_vector(x, y):
     eps = 1e-6
     if x.dtype not in [tf.complex64, tf.complex128]:
         raise TypeError('x must be complex number')
-    IVx = tf.math.real(tf.math.conj(x[..., 0]) * x[..., 3])
-    IVy = tf.math.real(tf.math.conj(x[..., 0]) * x[..., 1])
-    IVz = tf.math.real(tf.math.conj(x[..., 0]) * x[..., 2])
+    conj_zero = tf.math.conj(x[..., 0])
+    IVx = tf.math.real(conj_zero * x[..., 3])
+    IVy = tf.math.real(conj_zero * x[..., 1])
+    IVz = tf.math.real(conj_zero * x[..., 2])
 
-    normal = eps + (tf.math.abs(x[..., 0])**2 + tf.math.abs(x[..., 1])**2 + tf.math.abs(x[..., 2])**2 + tf.math.abs(x[..., 3])**2)/2.
+    normal = tf.math.sqrt(IVx**2 + IVy**2 + IVz**2)
+    normal = tf.math.maximum(normal, eps)
     IVx /= normal
     IVy /= normal
     IVz /= normal
@@ -386,7 +388,7 @@ class Pipline_Trainset_Dataloader:
         for pre in self.batch_preprocessing:
             trainset = trainset.map(pre)
 
-        return trainset.prefetch(tf.data.AUTOTUNE).cache()
+        return trainset.prefetch(tf.data.AUTOTUNE)
 
     @tf.function
     def get_mono_y_idx(self):
@@ -406,11 +408,14 @@ class Pipline_Trainset_Dataloader:
         mono_y_frame = self.y[yy.numpy()[:,0], yy.numpy()[:,1]]
         mono_x_frame = self.x[xx.numpy()[:,0], xx.numpy()[:,1]]
 
-        y_frame_offset = tf.random.uniform((), maxval=y.shape[0] - tf.shape(mono_y_frame)[0], dtype=tf.int32)
-        mono_y_frame = tf.pad(mono_y_frame, ((y_frame_offset, y.shape[0] - y_frame_offset - tf.shape(mono_y_frame)[0]),(0,0)))
-        x_frame_offset = y_frame_offset * self.resolution
-        mono_x_frame = tf.pad(mono_x_frame, ((x_frame_offset, x.shape[0] - x_frame_offset - tf.shape(mono_x_frame)[0]),(0,0),(0,0)))
-        return mono_x_frame, mono_y_frame
+        @tf.function
+        def pad(x_frame, y_frame, xlen, ylen):
+            y_frame_offset = tf.random.uniform((), maxval=ylen - tf.shape(y_frame)[0], dtype=tf.int32)
+            y_frame = tf.pad(y_frame, ((y_frame_offset, ylen - y_frame_offset - tf.shape(y_frame)[0]),(0,0)))
+            x_frame_offset = y_frame_offset * self.resolution
+            x_frame = tf.pad(x_frame, ((x_frame_offset, xlen - x_frame_offset - tf.shape(x_frame)[0]),(0,0),(0,0)))
+            return x_frame, y_frame
+        return pad(mono_x_frame, mono_y_frame, x.shape[0], y.shape[0])
 
     @tf.function
     def filtering(self, x, y, mono_x_frame, mono_y_frame):
@@ -430,7 +435,6 @@ class Pipline_Trainset_Dataloader:
     def EMDA(self, x, y):
         # x: (frame, freq, chan)
         # y: (frame_label, SED+DOA)
-
         mono_x_frame, mono_y_frame = self.get_mono_frame(x, y)
 
         # equilizer가 완성되면 사용
