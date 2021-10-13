@@ -354,8 +354,7 @@ class Pipline_Trainset_Dataloader:
         self.equalizer = biquad_equalizer(self.sr)
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
-        # self.sample_preprocessing.append(self.EMDA)
-        self.sample_preprocessing.append(get_intensity_vector)
+        self.sample_preprocessing.append(self.EMDA)
 
     @tf.function
     def get_x_from_y(self, y, resolution):

@@ -38,17 +38,17 @@ def frequency_masking(mel_spectrogram, frequency_masking_para=27, frequency_mask
     """
     # Step 2 : Frequency masking
     fbank_size = tf.shape(mel_spectrogram)
-    n, v = fbank_size[1], fbank_size[2]
+    n, v = fbank_size[0], fbank_size[1]
     for i in range(frequency_mask_num):
         f = tf.random.uniform([], minval=0, maxval=frequency_masking_para, dtype=tf.int32)
         v = tf.cast(v, dtype=tf.int32)
         f0 = tf.random.uniform([], minval=0, maxval=v-f, dtype=tf.int32)
 
         # warped_mel_spectrogram[f0:f0 + f, :] = 0
-        mask = tf.concat((tf.ones(shape=(1, n, v - f0 - f, 1)),
-                          tf.zeros(shape=(1, n, f, 1)),
-                          tf.ones(shape=(1, n, f0, 1)),
-                          ), 2)
+        mask = tf.concat((tf.ones(shape=(n, v - f0 - f, 1)),
+                          tf.zeros(shape=(n, f, 1)),
+                          tf.ones(shape=(n, f0, 1)),
+                          ), 1)
         mel_spectrogram = mel_spectrogram * mask
     return tf.cast(mel_spectrogram, dtype=tf.float32)
 
@@ -69,9 +69,9 @@ def time_masking(x, y, tau, time_masking_para=100, time_mask_num=2):
       mel_spectrogram(numpy array): warped and masked mel spectrogram.
     """
     fbank_size = tf.shape(x)
-    n, v = fbank_size[1], fbank_size[2]
-    axis = 1
-    resolution = int(tf.math.ceil(fbank_size[1] / tf.shape(y)[1]))
+    n, v = fbank_size[0], fbank_size[1]
+    axis = 0
+    resolution = int(tf.math.ceil(fbank_size[0] / tf.shape(y)[0]))
 
     # Step 3 : Time masking
     for i in range(time_mask_num):
@@ -79,19 +79,28 @@ def time_masking(x, y, tau, time_masking_para=100, time_mask_num=2):
         t0 = tf.random.uniform([], minval=0, maxval=int(tf.math.ceil(tau / resolution)) - t, dtype=tf.int32)
 
         # x[:, t0:t0 + t] = 0
-        mask = tf.concat((tf.ones(shape=(1, tf.shape(y)[1]-t0-t, v, 1)),
-                          tf.zeros(shape=(1, t, v, 1)),
-                          tf.ones(shape=(1, t0, v, 1)),
+        mask = tf.concat((tf.ones(shape=(tf.shape(y)[axis]-t0-t, v, 1)),
+                          tf.zeros(shape=(t, v, 1)),
+                          tf.ones(shape=(t0, v, 1)),
                           ), axis)
-        y *= mask[:,:,:1,0]
-        x = x * tf.repeat(mask, repeats=resolution, axis=axis)[:,:x.shape[1]]
+        y *= mask[:,:1,0]
+        x = x * tf.repeat(mask, repeats=resolution, axis=axis)[:x.shape[axis]]
     return tf.cast(x, dtype=tf.float32), y
 
 
+@tf.function
+def swap_channel(x, y):
+    # x = (window, freq, chan)
+    perm = 2 * tf.random.uniform((1,), maxval=2, dtype=tf.int32)
+    perm = tf.concat([perm, tf.ones_like(perm), 2-perm], axis=-1)
+    x = tf.concat([x[..., :1], tf.gather(x[..., 1:4], perm, axis=-1)], axis=-1)
+    return x, y
+
+
+@tf.function
 def spec_augment(x, y):
-    # x = (batch, time, freq, chan)
-    v = x.shape[0]
-    tau = x.shape[1]
+    # x = (window, freq, chan)
+    tau = tf.shape(x)[0]
 
     x = frequency_masking(x)
     x, y = time_masking(x, y, tau=tau)

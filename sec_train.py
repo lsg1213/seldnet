@@ -455,8 +455,12 @@ def main(config):
     batch_preprocessing = []
     trainsetloader = Pipline_Trainset_Dataloader(os.path.join(config.abspath, 'DCASE2021'), batch=config.batch, iters=config.iters, 
                         batch_preprocessing=[
-                            # spec_augment, 
                             split_total_labels_to_sed_doa
+                        ],
+                        sample_preprocessing=[
+                            swap_channel,
+                            get_intensity_vector,
+                            spec_augment,
                         ])
     valset = get_val_dataset(config)
     testset = get_test_dataset(config)
