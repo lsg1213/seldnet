@@ -2,7 +2,7 @@ import argparse
 import os
 import time
 from collections import OrderedDict
-from math import ceil
+from math import ceil, log
 
 import numpy as np
 import tensorflow as tf
@@ -33,7 +33,7 @@ args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/meta
 
 
 # training
-args.add_argument('--lr', type=float, default=0.00005)
+args.add_argument('--lr', type=float, default=0.001)
 args.add_argument('--iters', type=int, default=10000)
 args.add_argument('--decay', type=float, default=0.9)
 args.add_argument('--batch', type=int, default=16)
@@ -51,7 +51,7 @@ args.add_argument('--loop_time', type=int, default=5,
 args.add_argument('--lad_doa_thresh', type=int, default=20)
 
 
-def bn_conv_block(inp, chn, kernel_size=3, dilation=1, pad=1, stride=1, test=False):
+def bn_conv_block(inp, chn, kernel_size=3, dilation=1, pad=1, stride=1):
     h = tf.keras.layers.BatchNormalization()(inp)
     h = tf.keras.layers.ReLU()(h)
     h = tf.keras.layers.ZeroPadding2D(padding=pad)(h)
@@ -77,7 +77,7 @@ def dilated_dense_block(inp, growth_rate, num_layers, kernel_size=3, pad=1, dila
 
         for i in range(num_layers - 1):
             d = int(2**(i+1)) if dilation else 1
-            tmp = bn_conv_block(lst[i], growth_rate*(num_layers-i), # (num_layers - 1 - i)에서 수정
+            tmp = bn_conv_block(lst[i], growth_rate*(num_layers - i - 1),
                                 dilation=d, kernel_size=kernel_size, pad=pad*d)
             update(tmp, i)
         # concatenate the splitted and updated Variables from the lst
@@ -85,7 +85,7 @@ def dilated_dense_block(inp, growth_rate, num_layers, kernel_size=3, pad=1, dila
     return h[..., -growth_rate:]
 
 
-def d3_block(inp, num_layers, growth_rate, n_blocks, kernel_size=3, pad=1, dilation=True, test=False):
+def d3_block(inp, num_layers, growth_rate, n_blocks, kernel_size=3, pad=1, dilation=True):
     '''
     Define D3Block
     '''
@@ -146,9 +146,10 @@ def get_model(input_shape):
     x = d3_block(x, 4, 40, 2)
 
     x = DPRNN(x, 100, 160, num_layers=4, bidirectional=True)
-    x = tf.keras.layers.AveragePooling2D(strides=(2,2), padding='valid')(x)
+    x = tf.keras.layers.AveragePooling2D((1,2), padding='valid')(x)
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten())(x)
-    x = tf.keras.layers.Conv1D(52, 1, use_bias=False, data_format='channels_first')(x)
+    # x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(160, return_sequences=True))(x)
+    x = tf.keras.layers.Conv1D(60, 1, use_bias=False, data_format='channels_first')(x)
     x = tf.keras.layers.Dense(36)(x)
     x = tf.keras.layers.Activation('tanh')(x)
 
@@ -206,38 +207,40 @@ def generate_teststep(criterion, config):
     return teststep
 
 
+
 def generate_iterloop(criterion, evaluator, writer, 
                       mode, config=None):
     if mode == 'train':
         step = generate_trainstep(criterion, config)
-        total = int(ceil(config.iters / config.batch))
     elif mode == 'val':
         step = generate_valstep(criterion, config)
-        total = int(ceil(100 / config.batch))
     else:
         step = generate_teststep(criterion, config)
-        total = 100 # test sample number
+
+    @tf.function
+    def overlap_and_criterion(preds, y, criterion):
+        preds = tf.transpose(preds, [2, 0, 1])
+        total_counts = tf.signal.overlap_and_add(tf.ones_like(preds), config.frame_step // config.resolution)[..., :y[1].shape[0]]
+        preds = tf.signal.overlap_and_add(preds, config.frame_step // config.resolution)[..., :y[1].shape[0]]
+        preds /= total_counts
+        preds = tf.transpose(preds, [1, 0])[tf.newaxis,...]
+        loss = criterion(y[1][tf.newaxis,...], preds)
+        return preds, loss
 
     def iterloop(model, dataset, epoch, optimizer=None):
         evaluator.reset_states()
         losses = tf.keras.metrics.Mean()
 
-        with tqdm(dataset, total=total) as pbar:
+        with tqdm(dataset) as pbar:
             for x, y in pbar:
                 if mode == 'test':
                     smalldata = tf.data.Dataset.from_tensor_slices(x)
-                    smalldata = smalldata.batch(config.batch).prefetch(tf.data.experimental.AUTOTUNE)
+                    smalldata = smalldata.batch(config.batch).prefetch(AUTOTUNE)
                     preds = tf.concat([step(model, x_) for x_ in smalldata], 0)
-                    preds = tf.transpose(preds, [2, 0, 1])
-                    total_counts = tf.signal.overlap_and_add(tf.ones_like(preds), config.frame_step // config.resolution)[..., :y[1].shape[0]]
-                    preds = tf.signal.overlap_and_add(preds, config.frame_step // config.resolution)[..., :y[1].shape[0]]
-                    preds /= total_counts
-                    preds = tf.transpose(preds, [1, 0])[tf.newaxis,...]
-                    y = (y[0][tf.newaxis,...],y[1][tf.newaxis,...])
-                    loss = criterion(y[1], preds)
+                    preds, loss = overlap_and_criterion(preds, y, criterion)
                 else:
                     preds, loss = step(model, x, y, optimizer)
-                y, preds = y, get_accdoa_labels(preds, preds.shape[-1] // 3)
+                preds = get_accdoa_labels(preds, preds.shape[-1] // 3)
                 
                 evaluator.update_states(y, preds)
                 metric_values = evaluator.result()
@@ -269,11 +272,12 @@ def generate_iterloop(criterion, evaluator, writer,
                     })
                 pbar.set_postfix(status)
 
-                if mode == 'train' and epoch * config.iters < 50000:
-                    lr_coefficient = 1.00004605 # 50000 root (0.001 / 0.0001)
-                    next_lr = min(optimizer.learning_rate * (lr_coefficient ** config.batch), 0.001 / (32 / config.batch))
-                    optimizer.learning_rate = next_lr
-                    tf.keras.backend.set_value(optimizer.lr, next_lr)
+                # if mode == 'train' and epoch * config.iters < 50000:
+                #     final_lr = 0.001
+                #     lr_coefficient = (final_lr / config.lr) ** (1 / 50000) # 50000 root (0.001 / 0.0001)
+                #     next_lr = min(optimizer.learning_rate * (lr_coefficient ** config.batch), final_lr / (32 / config.batch))
+                #     optimizer.learning_rate = next_lr
+                #     tf.keras.backend.set_value(optimizer.lr, next_lr)
 
         writer.add_scalar(f'{mode}/{mode}_ErrorRate', metric_values[0].numpy(),
                           epoch)
@@ -308,21 +312,17 @@ def get_test_dataset(config):
     x = joblib.load(os.path.join(path, f'foa_dev_val_stft_480.joblib'))
     y = joblib.load(os.path.join(path, f'foa_dev_val_label.joblib'))
 
-    sr = 24000
-    # hop_sec = 0.02 # second
     hop_len =  20 * (x.shape[1] // y.shape[1])
     config = vars(config)
     config['frame_step'] = hop_len
     config['resolution'] = x.shape[1] // y.shape[1]
     config = argparse.Namespace(**config)
     frame_num = 512
-    label_num = ceil(frame_num / (x.shape[1] / y.shape[1]))
 
     def frame(data):
         return tf.signal.frame(data, frame_num, hop_len, axis=0, pad_end=True).numpy()
     
     x = np.stack(list(map(frame, x)), 0)
-    # x = np.concatenate([x.real, x.imag], -1)
 
     def generator(x, y):
         def _generator():
@@ -334,11 +334,10 @@ def get_test_dataset(config):
         tf.TensorSpec((x.shape[1], frame_num, x.shape[-2], None), dtype=x.dtype),
         tf.TensorSpec((y.shape[1], y.shape[-1]), dtype=y.dtype)
     ))
-    # dataset = dataset.batch(config.batch, drop_remainder=False)
-    dataset = dataset.map(get_intensity_vector)
-    dataset = dataset.map(split_total_labels_to_sed_doa)
+    dataset = apply_ops(dataset, get_intensity_vector)
+    dataset = apply_ops(dataset, split_total_labels_to_sed_doa)
 
-    return dataset.prefetch(tf.data.experimental.AUTOTUNE)
+    return dataset.prefetch(AUTOTUNE)
 
 
 def get_val_dataset(config):
@@ -348,14 +347,12 @@ def get_val_dataset(config):
 
     x = x.reshape([-1, x.shape[-2], x.shape[-1]])
     y = y.reshape([-1, y.shape[-1]])
-    num = x.shape[0]
     frame_len = 512
     label_num = ceil(frame_len / (x.shape[0] / y.shape[0]))
     frame_num = label_num * (x.shape[0] // y.shape[0])
     x = np.pad(x, ((0, frame_num - (x.shape[0] % frame_num)), (0,0), (0,0)))
     # frame_size 520, frame step 512
     x = x.reshape((-1, frame_num, x.shape[-2], x.shape[-1]))[:,:frame_len]
-    # x = np.concatenate([x.real, x.imag], -1)
     y = np.pad(y, ((0, label_num - (y.shape[0] % label_num)),(0,0)))
     y = y.reshape((-1,label_num, y.shape[-1]))
 
@@ -369,101 +366,84 @@ def get_val_dataset(config):
         tf.TensorSpec((frame_len, x.shape[-2], None), dtype=x.dtype),
         tf.TensorSpec((label_num, y.shape[-1]), dtype=y.dtype)
     ))
-    dataset = dataset.map(get_intensity_vector)
+    dataset = apply_ops(dataset, get_intensity_vector)
     dataset = dataset.batch(config.batch, drop_remainder=False)
-    dataset = dataset.map(split_total_labels_to_sed_doa)
+    dataset = apply_ops(dataset, split_total_labels_to_sed_doa)
 
-    return dataset.prefetch(tf.data.experimental.AUTOTUNE)
+    return dataset.prefetch(AUTOTUNE)
 
 
-def ensemble_outputs(model, xs: list, 
-                     win_size=300, step_size=5, batch_size=256):
-    @tf.function
-    def predict(model, x, batch_size):
-        windows = tf.signal.frame(x, win_size, step_size, axis=0)
+# only for mel-spectrogram dataset
+def get_dataset(config, mode: str = 'train'):
+    path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
 
-        sed, doa = [], []
-        for i in range(int(np.ceil(windows.shape[0]/batch_size))):
-            y_p = model(windows[i*batch_size:(i+1)*batch_size], training=False)
-            s, d = get_accdoa_labels(y_p, y_p.shape[-1] // 3)
-            sed.append(s)
-            doa.append(d)
-        sed = tf.concat(sed, 0)
-        doa = tf.concat(doa, 0)
-
-        # windows to seq
-        total_counts = tf.signal.overlap_and_add(
-            tf.ones((sed.shape[0], win_size//step_size), dtype=sed.dtype),
-            1)[..., tf.newaxis]
-        sed = tf.signal.overlap_and_add(tf.transpose(sed, (2, 0, 1)), 1)
-        sed = tf.transpose(sed, (1, 0)) / total_counts
-        doa = tf.signal.overlap_and_add(tf.transpose(doa, (2, 0, 1)), 1)
-        doa = tf.transpose(doa, (1, 0)) / total_counts
-
-        return sed, doa
-
-    # assume 0th dim of each sample is time dim
-    seds = []
-    doas = []
+    x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
+                             os.path.join(path, 'foa_dev_label'), 
+                             mode=mode, n_freq_bins=64)
     
-    for x in xs:
-        sed, doa = predict(model, x, batch_size)
-        seds.append(sed)
-        doas.append(doa)
-
-    return list(zip(seds, doas))
-
-
-def generate_evaluate_fn(test_xs, test_ys, evaluator, batch_size=256,
-                         writer=None):
-    def evaluate_fn(model, epoch):
-        start = time.time()
-        evaluator.reset_states()
-        e_outs = ensemble_outputs(model, test_xs, batch_size=batch_size)
-
-        for y, pred in zip(test_ys, e_outs):
-            evaluator.update_states(y, pred)
-
-        metric_values = evaluator.result()
-        seld_score = calculate_seld_score(metric_values).numpy()
-        er, f, der, derf = list(map(lambda x: x.numpy(), metric_values))
-
-        if writer is not None:
-            writer.add_scalar('ENS_T/ER', er, epoch)
-            writer.add_scalar('ENS_T/F', f, epoch)
-            writer.add_scalar('ENS_T/DER', der, epoch)
-            writer.add_scalar('ENS_T/DERF', derf, epoch)
-            writer.add_scalar('ENS_T/seldScore', seld_score, epoch)
-        print('ensemble outputs')
-        print(f'ER: {er:4f}, F: {f:4f}, DER: {der:4f}, DERF: {derf:4f}, '
-              f'SELD: {seld_score:4f} '
-              f'({time.time()-start:.4f} secs)')
-        return seld_score, metric_values
-    return evaluate_fn
+    if config.use_tfm and mode == 'train':
+        sample_transforms = [
+            random_ups_and_downs,
+            # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
+            lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
+        ]
+    else:
+        sample_transforms = []
+    batch_transforms = [split_total_labels_to_sed_doa]
+    if config.use_acs and mode == 'train':
+        batch_transforms.insert(0, foa_intensity_vec_aug)
+    dataset = seldnet_data_to_dataloader(
+        x, y,
+        train= mode == 'train',
+        batch_transforms=batch_transforms,
+        label_window_size=60,
+        batch_size=config.batch,
+        sample_transforms=sample_transforms,
+        loop_time=config.loop_time
+    )
+    if mode == 'test':
+        dataset = dataset.unbatch()
+    return dataset
 
 
 def main(config):
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     config.epoch = config.epoch // config.iters
-    swa_start_epoch = 80
-    swa_freq = 2
     n_classes = 12
 
     # data load
-    # trainset = get_dataset(config, 'train')
-    sample_preprocessing = []
-    batch_preprocessing = []
-    trainsetloader = Pipline_Trainset_Dataloader(os.path.join(config.abspath, 'DCASE2021'), batch=config.batch, iters=config.iters, 
-                        batch_preprocessing=[
-                            split_total_labels_to_sed_doa
-                        ],
-                        sample_preprocessing=[
-                            swap_channel,
-                            get_intensity_vector,
-                            spec_augment,
-                        ])
-    valset = get_val_dataset(config)
-    testset = get_test_dataset(config)
+    # trainsetloader = Pipline_Trainset_Dataloader(os.path.join(config.abspath, 'DCASE2021'), batch=config.batch, iters=config.iters, 
+    #                     batch_preprocessing=[
+    #                         split_total_labels_to_sed_doa
+    #                     ],
+    #                     sample_preprocessing=[
+    #                         swap_channel,
+    #                         get_intensity_vector,
+    #                         # spec_augment,
+    #                     ])
+    # valset = get_val_dataset(config)
+    # testset = get_test_dataset(config)
+
+    # --------------------------- mel dataset ------------------------------------
+    trainset = get_dataset(config, 'train')
+    valset = get_dataset(config, 'val')
+    path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
+    test_xs, test_ys = load_seldnet_data(
+        os.path.join(path, 'foa_dev_norm'),
+        os.path.join(path, 'foa_dev_label'), 
+        mode='test', n_freq_bins=64)
+    config = vars(config)
+    config['frame_step'] = 100
+    config['frame_num'] = 300
+    config['resolution'] = 5
+    config = argparse.Namespace(**config)
+    def frame(data):
+        return tf.signal.frame(data, config.frame_num, config.frame_step, axis=0, pad_end=True).numpy()
+    
+    test_xs = np.stack(list(map(frame, test_xs)), 0)
+    testset = tf.data.Dataset.from_tensor_slices((test_xs, test_ys))
+    testset = apply_ops(testset, split_total_labels_to_sed_doa)
+    # -----------------------------------------------------------------------------
 
     tensorboard_path = os.path.join('./tensorboard_log', config.name)
     if not os.path.exists(tensorboard_path):
@@ -517,7 +497,7 @@ def main(config):
     #     test_xs, test_ys, evaluator, config.batch, writer=writer)
 
     for epoch in range(config.epoch):
-        trainset = next(trainsetloader)
+        # trainset = next(trainsetloader)
 
         # if epoch % 10 == 0:
         #     evaluate_fn(model, epoch)
