@@ -317,7 +317,7 @@ def get_preprocessed_x_tf(wav, sr, mode='foa', n_mels=64,
 
 @tf.function
 def get_intensity_vector(x, y):
-    eps = 1e-6
+    eps = 1e-8
     if x.dtype not in [tf.complex64, tf.complex128]:
         raise TypeError('x must be complex number')
     conj_zero = tf.math.conj(x[..., 0])
@@ -333,6 +333,20 @@ def get_intensity_vector(x, y):
 
     foa_iv = tf.stack((IVx, IVy, IVz), -1)
     return tf.concat([tf.math.real(x), foa_iv], -1), y
+
+
+def apply_ops(dataset, operations):
+    if operations is None:
+        return dataset
+
+    if not isinstance(operations, (list, tuple)):
+        operations = [operations]
+
+    for op in operations:
+        dataset = dataset.map(
+            op, num_parallel_calls=AUTOTUNE, deterministic=False)
+
+    return dataset
 
 
 class Pipline_Trainset_Dataloader:
@@ -354,7 +368,7 @@ class Pipline_Trainset_Dataloader:
         self.equalizer = biquad_equalizer(self.sr)
         self.mono_y_idx = self.get_mono_y_idx()
         self.mono_x_idx = self.get_x_from_y(self.mono_y_idx, self.resolution)
-        self.sample_preprocessing.append(self.EMDA)
+        # self.sample_preprocessing.insert(1, self.EMDA)
 
     @tf.function
     def get_x_from_y(self, y, resolution):
@@ -384,10 +398,9 @@ class Pipline_Trainset_Dataloader:
 
         trainset = trainset.batch(self.batch)
         print('batch_preprocessing')
-        for pre in self.batch_preprocessing:
-            trainset = trainset.map(pre)
+        trainset = apply_ops(trainset, self.batch_preprocessing)
 
-        return trainset.prefetch(tf.data.AUTOTUNE)
+        return trainset
 
     @tf.function
     def get_mono_y_idx(self):
@@ -436,7 +449,6 @@ class Pipline_Trainset_Dataloader:
         # y: (frame_label, SED+DOA)
         mono_x_frame, mono_y_frame = self.get_mono_frame(x, y)
 
-        # equilizer가 완성되면 사용
         mono_x_frame = self.equalizer(mono_x_frame)
         x = self.equalizer(x)
 
@@ -462,6 +474,5 @@ if __name__ == '__main__':
     trainsetloader = Pipline_Trainset_Dataloader(path, batch=32, sample_preprocessing=sample_preprocessing, batch_preprocessing=batch_preprocessing)
     trainset = next(trainsetloader)
     [None for _ in trainset]
-    import pdb; pdb.set_trace()
     
  

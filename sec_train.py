@@ -24,6 +24,7 @@ from params import get_param
 args = argparse.ArgumentParser()
     
 args.add_argument('--name', type=str, required=True)
+args.add_argument('--model', type=str, default='DPRNN')
 
 args.add_argument('--gpus', type=str, default='-1')
 args.add_argument('--resume', action='store_true')    
@@ -41,7 +42,7 @@ args.add_argument('--agc', type=bool, default=False)
 args.add_argument('--epoch', type=int, default=400000)
 args.add_argument('--lr_patience', type=int, default=40000, 
                     help='learning rate decay patience for plateau')
-args.add_argument('--patience', type=int, default=100, 
+args.add_argument('--patience', type=int, default=100000, 
                     help='early stop patience')
 args.add_argument('--use_acs', type=bool, default=True)
 args.add_argument('--use_tfm', type=bool, default=True)
@@ -135,7 +136,7 @@ def DPRNN(inp, hidden_size, output_size, dropout=0, num_layers=1, bidirectional=
 
 # https://github.com/sony/ai-research-code/blob/596d4ba79737de3bcf4f0f8bd934195c90c957c7/d3net/music-source-separation/model.py#L60
 # https://github.com/ShiZiqiang/dual-path-RNNs-DPRNNs-based-speech-separation/blob/master/models.py
-def get_model(input_shape):
+def get_model(input_shape, config):
     inp = tf.keras.layers.Input(shape = input_shape)
     x = d3_block(inp, 4, 16, 2)
     x = tf.keras.layers.AveragePooling2D(strides=(2,2), padding='valid')(x)
@@ -144,12 +145,14 @@ def get_model(input_shape):
     x = d3_block(x, 4, 32, 2)
     x = tf.keras.layers.AveragePooling2D(strides=(2,2), padding='valid')(x)
     x = d3_block(x, 4, 40, 2)
-
-    x = DPRNN(x, 100, 160, num_layers=4, bidirectional=True)
+    
+    if config.model == 'DPRNN':
+        x = DPRNN(x, 100, 160, num_layers=4, bidirectional=True)
     x = tf.keras.layers.AveragePooling2D((1,2), padding='valid')(x)
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten())(x)
-    # x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(160, return_sequences=True))(x)
-    x = tf.keras.layers.Conv1D(60, 1, use_bias=False, data_format='channels_first')(x)
+    if config.model == 'GRU':
+        x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(160, return_sequences=True))(x)
+    x = tf.keras.layers.Conv1D(52, 1, use_bias=False, data_format='channels_first')(x)
     x = tf.keras.layers.Dense(36)(x)
     x = tf.keras.layers.Activation('tanh')(x)
 
@@ -207,7 +210,6 @@ def generate_teststep(criterion, config):
     return teststep
 
 
-
 def generate_iterloop(criterion, evaluator, writer, 
                       mode, config=None):
     if mode == 'train':
@@ -233,7 +235,7 @@ def generate_iterloop(criterion, evaluator, writer,
 
         with tqdm(dataset) as pbar:
             for x, y in pbar:
-                if mode == 'test':
+                if mode in ('test'):
                     smalldata = tf.data.Dataset.from_tensor_slices(x)
                     smalldata = smalldata.batch(config.batch).prefetch(AUTOTUNE)
                     preds = tf.concat([step(model, x_) for x_ in smalldata], 0)
@@ -374,75 +376,74 @@ def get_val_dataset(config):
 
 
 # only for mel-spectrogram dataset
-def get_dataset(config, mode: str = 'train'):
+def get_mel_dataset(config, mode: str = 'train'):
     path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
 
     x, y = load_seldnet_data(os.path.join(path, 'foa_dev_norm'),
                              os.path.join(path, 'foa_dev_label'), 
                              mode=mode, n_freq_bins=64)
     
-    if config.use_tfm and mode == 'train':
-        sample_transforms = [
-            random_ups_and_downs,
-            # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
-            lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
-        ]
+    if mode == 'train':
+        if config.use_tfm:
+            sample_transforms = [
+                random_ups_and_downs,
+                # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
+                lambda x, y: (mask(x, axis=-2, max_mask_size=16), y),
+            ]
+        else:
+            sample_transforms = []
+        batch_transforms = [split_total_labels_to_sed_doa]
+        if config.use_acs:
+            batch_transforms.insert(0, foa_intensity_vec_aug)
+        dataset = seldnet_data_to_dataloader(
+            x, y,
+            train= mode == 'train',
+            batch_transforms=batch_transforms,
+            label_window_size=60,
+            batch_size=config.batch,
+            sample_transforms=sample_transforms,
+            loop_time=config.loop_time
+        )
     else:
-        sample_transforms = []
-    batch_transforms = [split_total_labels_to_sed_doa]
-    if config.use_acs and mode == 'train':
-        batch_transforms.insert(0, foa_intensity_vec_aug)
-    dataset = seldnet_data_to_dataloader(
-        x, y,
-        train= mode == 'train',
-        batch_transforms=batch_transforms,
-        label_window_size=60,
-        batch_size=config.batch,
-        sample_transforms=sample_transforms,
-        loop_time=config.loop_time
-    )
-    if mode == 'test':
-        dataset = dataset.unbatch()
+        def frame(data):
+            return tf.signal.frame(data, config.frame_num, config.frame_step, axis=0, pad_end=True).numpy()
+        
+        x = np.stack(list(map(frame, x)), 0)
+        dataset = tf.data.Dataset.from_tensor_slices((x, y))
+        dataset = apply_ops(dataset, split_total_labels_to_sed_doa)
     return dataset
 
 
 def main(config):
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     config.epoch = config.epoch // config.iters
+    config.model = config.model.upper()
+    if config.model not in ('DPRNN', 'GRU'):
+        raise argparse.ArgumentError(None, 'model must be DPRNN OR GRU')
     n_classes = 12
 
     # data load
-    # trainsetloader = Pipline_Trainset_Dataloader(os.path.join(config.abspath, 'DCASE2021'), batch=config.batch, iters=config.iters, 
-    #                     batch_preprocessing=[
-    #                         split_total_labels_to_sed_doa
-    #                     ],
-    #                     sample_preprocessing=[
-    #                         swap_channel,
-    #                         get_intensity_vector,
-    #                         # spec_augment,
-    #                     ])
-    # valset = get_val_dataset(config)
-    # testset = get_test_dataset(config)
+    trainsetloader = Pipline_Trainset_Dataloader(os.path.join(config.abspath, 'DCASE2021'), batch=config.batch, iters=config.iters, 
+                        batch_preprocessing=[
+                            split_total_labels_to_sed_doa
+                        ],
+                        sample_preprocessing=[
+                            swap_channel,
+                            get_intensity_vector,
+                            # spec_augment,
+                        ])
+    valset = get_val_dataset(config)
+    testset = get_test_dataset(config)
 
     # --------------------------- mel dataset ------------------------------------
-    trainset = get_dataset(config, 'train')
-    valset = get_dataset(config, 'val')
-    path = os.path.join(config.abspath, 'DCASE2021/feat_label/')
-    test_xs, test_ys = load_seldnet_data(
-        os.path.join(path, 'foa_dev_norm'),
-        os.path.join(path, 'foa_dev_label'), 
-        mode='test', n_freq_bins=64)
-    config = vars(config)
-    config['frame_step'] = 100
-    config['frame_num'] = 300
-    config['resolution'] = 5
-    config = argparse.Namespace(**config)
-    def frame(data):
-        return tf.signal.frame(data, config.frame_num, config.frame_step, axis=0, pad_end=True).numpy()
-    
-    test_xs = np.stack(list(map(frame, test_xs)), 0)
-    testset = tf.data.Dataset.from_tensor_slices((test_xs, test_ys))
-    testset = apply_ops(testset, split_total_labels_to_sed_doa)
+    # trainset = get_mel_dataset(config, 'train')
+    # config = vars(config)
+    # config['frame_step'] = 100
+    # config['frame_num'] = 300
+    # config['resolution'] = 5
+    # config = argparse.Namespace(**config)
+    # valset = get_mel_dataset(config, 'val')
+    # testset = get_mel_dataset(config, 'test')
     # -----------------------------------------------------------------------------
 
     tensorboard_path = os.path.join('./tensorboard_log', config.name)
@@ -466,7 +467,7 @@ def main(config):
 
     x, _ = [(x, y) for x, y in valset.take(1)][0]
     input_shape = x.shape[1:]
-    model = get_model(input_shape)
+    model = get_model(input_shape, config)
     model.summary()
 
     optimizer = tfa.optimizers.AdamW(1e-6, config.lr)
@@ -497,7 +498,7 @@ def main(config):
     #     test_xs, test_ys, evaluator, config.batch, writer=writer)
 
     for epoch in range(config.epoch):
-        # trainset = next(trainsetloader)
+        trainset = next(trainsetloader)
 
         # if epoch % 10 == 0:
         #     evaluate_fn(model, epoch)
@@ -520,17 +521,17 @@ def main(config):
                 include_optimizer=False)
         else:
             if 50000 <= config.iters * epoch:
+                lr_decay_patience += 1
+                early_stop_patience += 1
+                print(f'lr_decay_patience: {lr_decay_patience}')
                 if lr_decay_patience * config.iters >= config.lr_patience and config.decay != 1:
                     print(f'iters: {epoch * config.iters}, lr: {optimizer.learning_rate.numpy():.5} -> {(optimizer.learning_rate * config.decay).numpy():.5}')
                     optimizer.learning_rate = optimizer.learning_rate * config.decay
                     lr_decay_patience = 0
 
-                # if early_stop_patience == config.patience:
-                #     print(f'Early Stopping at {epoch * config.iters}, score is {score}')
-                #     break
-                # early_stop_patience += 1
-                lr_decay_patience += 1
-                print(f'lr_decay_patience: {lr_decay_patience}')
+                if early_stop_patience * config.iters == config.patience:
+                    print(f'Early Stopping at {epoch * config.iters}, score is {score}')
+                    break
 
     # end of training
     print(f'iters: {epoch * config.iters}')
