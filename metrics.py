@@ -107,9 +107,15 @@ class SELDMetrics:
 
         if len(sed_true.shape) == 2:
             sed_true = sed_true[tf.newaxis, :]
+        if len(sed_pred.shape) == 2:
             sed_pred = sed_pred[tf.newaxis, :]
+        if len(doa_true.shape) == 2:
             doa_true = doa_true[tf.newaxis, :]
+        if len(doa_pred.shape) == 2:
             doa_pred = doa_pred[tf.newaxis, :]
+            
+        if sed_true.shape[0] != sed_pred.shape[0]:
+            raise ValueError('something wrong')
 
         # change doa shape from [..., n_classes*3] to [..., n_classes, 3]
         doa_true = tf.reshape(doa_true, (*doa_true.shape[:-1], 3, -1))
