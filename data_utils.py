@@ -152,13 +152,24 @@ if __name__ == '__main__':
     import tensorflow as tf
     import numpy as np
     from tqdm import tqdm
-    mode = 'test'
+    
+    modes = ('train', 'val', 'test')
     path = '/root/datasets/DCASE2021'
-    x, y, sr = load_wav_and_label(os.path.join(path, 'foa_dev'),
-                             os.path.join(path, 'metadata_dev'),
-                             mode=mode)
-    x = np.stack([stft(i).numpy() for i in tqdm(x)], 0).transpose(0,2,3,1)
-    y = np.stack(y, 0)
-    joblib.dump(x, os.path.join(path, f'foa_dev_{mode}_stft_480.joblib'))
-    joblib.dump(y, os.path.join(path, f'foa_dev_{mode}_label.joblib'))
-
+    x_ = []
+    for mode in modes:
+        print(mode)
+        x, y, sr = load_wav_and_label(os.path.join(path, 'foa_dev'),
+                                os.path.join(path, 'metadata_dev'),
+                                mode=mode)
+        x = np.stack([stft(i).numpy() for i in tqdm(x)], 0).transpose(0,2,3,1)
+        y = np.stack(y, 0)
+        joblib.dump(x, os.path.join(path, f'foa_dev_{mode}_stft_480.joblib'))
+        joblib.dump(y, os.path.join(path, f'foa_dev_{mode}_label.joblib'))
+        x_.append(x)
+    x_ = np.concatenate(x_, 0)
+    mean = x_.mean(0)
+    std = x_.std(0)
+    for mode in modes:
+        print(mode)
+        x = joblib.load(os.path.join(path, f'foa_dev_{mode}_stft_480.joblib'))
+        joblib.dump((x - mean) / std, os.path.join(path, f'foa_dev_{mode}_stft_480_norm.joblib'))

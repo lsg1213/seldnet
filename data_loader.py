@@ -350,8 +350,10 @@ def apply_ops(dataset, operations):
 
 
 class Pipline_Trainset_Dataloader:
-    def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[]):
-        self.x = joblib.load(os.path.join(path, 'foa_dev_train_stft_480.joblib')) # (sample_num, frame_num, freqs, chan)
+    def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[], norm=True):
+        name = f'foa_dev_train_stft_480' + ('_norm' if norm else '')
+        name += '.joblib'
+        self.x = joblib.load(os.path.join(path, name)) # (sample_num, frame_num, freqs, chan)
         self.y = joblib.load(os.path.join(path, 'foa_dev_train_label.joblib')) # (sample_num, label_frame_num, SED+DOA)
         self.sr = 24000
         if self.x.shape[0] % self.y.shape[0] != 0:

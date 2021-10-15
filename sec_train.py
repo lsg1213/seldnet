@@ -31,6 +31,7 @@ args.add_argument('--resume', action='store_true')
 args.add_argument('--abspath', type=str, default='/root/datasets')
 args.add_argument('--output_path', type=str, default='./output')
 args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/metadata_dev/')
+args.add_argument('--norm', action='store_true')
 
 
 # training
@@ -147,13 +148,13 @@ def get_model(input_shape, config):
     x = d3_block(x, 4, 40, 2)
     
     if config.model == 'DPRNN':
-        x = DPRNN(x, 100, 160, num_layers=4, bidirectional=True)
+        x = DPRNN(x, 160, 160, num_layers=4, bidirectional=True)
     x = tf.keras.layers.AveragePooling2D((1,2), padding='valid')(x)
     x = tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten())(x)
     if config.model == 'GRU':
         x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(160, return_sequences=True))(x)
-    x = tf.keras.layers.Conv1D(52, 1, use_bias=False, data_format='channels_first')(x)
     x = tf.keras.layers.Dense(36)(x)
+    x = tf.keras.layers.Conv1D(52, 1, use_bias=False, data_format='channels_first')(x)
     x = tf.keras.layers.Activation('tanh')(x)
 
     return tf.keras.Model(inputs=inp, outputs=x)
@@ -311,7 +312,9 @@ def random_ups_and_downs(x, y):
 
 def get_test_dataset(config):
     path = os.path.join(config.abspath, 'DCASE2021')
-    x = joblib.load(os.path.join(path, f'foa_dev_val_stft_480.joblib'))
+    name = f'foa_dev_test_stft_480' + ('_norm' if config.norm else '')
+    name += '.joblib'
+    x = joblib.load(os.path.join(path, name))
     y = joblib.load(os.path.join(path, f'foa_dev_val_label.joblib'))
 
     hop_len =  20 * (x.shape[1] // y.shape[1])
@@ -344,7 +347,9 @@ def get_test_dataset(config):
 
 def get_val_dataset(config):
     path = os.path.join(config.abspath, 'DCASE2021')
-    x = joblib.load(os.path.join(path, f'foa_dev_val_stft_480.joblib'))
+    name = f'foa_dev_val_stft_480' + ('_norm' if config.norm else '')
+    name += '.joblib'
+    x = joblib.load(os.path.join(path, name))
     y = joblib.load(os.path.join(path, f'foa_dev_val_label.joblib'))
 
     x = x.reshape([-1, x.shape[-2], x.shape[-1]])
@@ -499,6 +504,8 @@ def main(config):
 
     for epoch in range(config.epoch):
         trainset = next(trainsetloader)
+
+        # normalize
 
         # if epoch % 10 == 0:
         #     evaluate_fn(model, epoch)
