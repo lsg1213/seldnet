@@ -106,7 +106,7 @@ def swap_channel(x, y):
     check = tf.reduce_sum(tf.cast(perm != correct_shape, tf.int32), -1, keepdims=True)
     feat_perm = (perm + check) % 3
     
-    cartesian = tf.gather(cartesian, feat_perm, axis=-2, batch_dims=1)
+    cartesian = tf.gather(cartesian, feat_perm, axis=-2)
     y = tf.concat([y[..., :-3, :], cartesian], axis=-2)
     y = tf.reshape(y, [-1] + [*y.shape[1:-2]] + [4*y.shape[-1]])
 
