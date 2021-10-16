@@ -91,9 +91,29 @@ def time_masking(x, y, tau, time_masking_para=100, time_mask_num=2):
 @tf.function
 def swap_channel(x, y):
     # x = (window, freq, chan)
-    perm = 2 * tf.random.uniform((1,), maxval=2, dtype=tf.int32)
+    flip = tf.cast(tf.random.uniform((3,), 0, 2, dtype=tf.int32), tf.float32)
+    class_num = y.shape[-1] // 4
+    y = tf.reshape(y, [-1] + [*y.shape[1:-1]] + [4, class_num])
+    cartesian = y[..., -3:, :]
+
+    cartesian = (1 - 2*tf.reshape(flip, (-1, 3, 1))) * cartesian
+
+
+    perm = 2 * tf.random.uniform((1,), maxval=2, dtype=tf.int32) # -1 결정
     perm = tf.concat([perm, tf.ones_like(perm), 2-perm], axis=-1)
-    x = tf.concat([x[..., :1], tf.gather(x[..., 1:4], perm, axis=-1)], axis=-1)
+    correct_shape = tf.constant([0,1,2], dtype=perm.dtype)
+    
+    check = tf.reduce_sum(tf.cast(perm != correct_shape, tf.int32), -1, keepdims=True)
+    feat_perm = (perm + check) % 3
+    
+    cartesian = tf.gather(cartesian, feat_perm, axis=-2, batch_dims=1)
+    y = tf.concat([y[..., :-3, :], cartesian], axis=-2)
+    y = tf.reshape(y, [-1] + [*y.shape[1:-2]] + [4*y.shape[-1]])
+
+    reshaped_x = x[..., 1:4]
+    reshaped_x = tf.complex(tf.math.real(reshaped_x), tf.math.imag(reshaped_x) * flip)
+    reshaped_x = tf.gather(x[..., 1:4], perm, axis=-1)
+    x = tf.concat([x[..., :1], reshaped_x], axis=-1)
     return x, y
 
 
