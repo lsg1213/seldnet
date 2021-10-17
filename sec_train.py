@@ -32,13 +32,14 @@ args.add_argument('--abspath', type=str, default='/root/datasets')
 args.add_argument('--output_path', type=str, default='./output')
 args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/metadata_dev/')
 args.add_argument('--norm', action='store_true')
+args.add_argument('--data', type=str, default='mel', choices=['mel','stft'])
 
 
 # training
 args.add_argument('--lr', type=float, default=0.001)
 args.add_argument('--iters', type=int, default=10000)
 args.add_argument('--decay', type=float, default=0.9)
-args.add_argument('--batch', type=int, default=16)
+args.add_argument('--batch', type=int, default=32)
 args.add_argument('--agc', type=bool, default=False)
 args.add_argument('--epoch', type=int, default=400000)
 args.add_argument('--lr_patience', type=int, default=40000, 
@@ -154,7 +155,11 @@ def get_model(input_shape, config):
     if config.model == 'GRU':
         x = tf.keras.layers.Bidirectional(tf.keras.layers.GRU(160, return_sequences=True))(x)
     x = tf.keras.layers.Dense(36)(x)
-    x = tf.keras.layers.Conv1D(52, 1, use_bias=False, data_format='channels_first')(x)
+    if config.data == 'stft':
+        x = tf.keras.layers.Conv1D(52, 1, use_bias=False, data_format='channels_first')(x)
+    elif config.data == 'mel':
+        x = tf.keras.layers.Conv1D(60, 1, use_bias=False, data_format='channels_first')(x)
+
     x = tf.keras.layers.Activation('tanh')(x)
 
     return tf.keras.Model(inputs=inp, outputs=x)
@@ -425,30 +430,36 @@ def main(config):
     config.model = config.model.upper()
     if config.model not in ('DPRNN', 'GRU'):
         raise argparse.ArgumentError(None, 'model must be DPRNN OR GRU')
+    name = '_'.join(['1', config.data, config.model, str(config.lr)])
+    if config.norm:
+        name += '_norm'
+    config.name = name + '_' + config.name
     n_classes = 12
 
     # data load
-    trainsetloader = Pipline_Trainset_Dataloader(os.path.join(config.abspath, 'DCASE2021'), batch=config.batch, iters=config.iters, 
-                        batch_preprocessing=[
-                            split_total_labels_to_sed_doa
-                        ],
-                        sample_preprocessing=[
-                            swap_channel,
-                            get_intensity_vector,
-                            # spec_augment,
-                        ])
-    valset = get_val_dataset(config)
-    testset = get_test_dataset(config)
+    if config.data == 'stft':
+        trainsetloader = Pipline_Trainset_Dataloader(os.path.join(config.abspath, 'DCASE2021'), batch=config.batch, iters=config.iters, 
+                            batch_preprocessing=[
+                                split_total_labels_to_sed_doa
+                            ],
+                            sample_preprocessing=[
+                                # swap_channel,
+                                get_intensity_vector,
+                                # spec_augment,
+                            ], norm=config.norm)
+        valset = get_val_dataset(config)
+        testset = get_test_dataset(config)
 
     # --------------------------- mel dataset ------------------------------------
-    # trainset = get_mel_dataset(config, 'train')
-    # config = vars(config)
-    # config['frame_step'] = 100
-    # config['frame_num'] = 300
-    # config['resolution'] = 5
-    # config = argparse.Namespace(**config)
-    # valset = get_mel_dataset(config, 'val')
-    # testset = get_mel_dataset(config, 'test')
+    elif config.data == 'mel':
+        trainset = get_mel_dataset(config, 'train')
+        config = vars(config)
+        config['frame_step'] = 100
+        config['frame_num'] = 300
+        config['resolution'] = 5
+        config = argparse.Namespace(**config)
+        valset = get_mel_dataset(config, 'val')
+        testset = get_mel_dataset(config, 'test')
     # -----------------------------------------------------------------------------
 
     tensorboard_path = os.path.join('./tensorboard_log', config.name)
@@ -475,7 +486,8 @@ def main(config):
     model = get_model(input_shape, config)
     model.summary()
 
-    optimizer = tfa.optimizers.AdamW(1e-6, config.lr)
+    # optimizer = tfa.optimizers.AdamW(1e-6, config.lr)
+    optimizer = tf.optimizers.Adam(config.lr)
     criterion = tf.keras.losses.MSE
 
     # stochastic weight averaging
@@ -503,7 +515,8 @@ def main(config):
     #     test_xs, test_ys, evaluator, config.batch, writer=writer)
 
     for epoch in range(config.epoch):
-        trainset = next(trainsetloader)
+        if config.data == 'stft':
+            trainset = next(trainsetloader)
 
         # normalize
 

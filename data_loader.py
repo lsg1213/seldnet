@@ -399,7 +399,6 @@ class Pipline_Trainset_Dataloader:
                     output_shapes=([self.frame_num] + [*self.x.shape[2:-1]] + [None], [self.label_num] + [*self.y.shape[2:]]))
 
         trainset = trainset.batch(self.batch)
-        print('batch_preprocessing')
         trainset = apply_ops(trainset, self.batch_preprocessing)
 
         return trainset
