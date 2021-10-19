@@ -37,6 +37,7 @@ args.add_argument('--data', type=str, default='mel', choices=['mel','stft'])
 
 # training
 args.add_argument('--lr', type=float, default=0.001)
+args.add_argument('--resolution', type=int, default=10)
 args.add_argument('--iters', type=int, default=10000)
 args.add_argument('--decay', type=float, default=0.9)
 args.add_argument('--batch', type=int, default=32)
@@ -315,74 +316,64 @@ def random_ups_and_downs(x, y):
     return x, y
 
 
-def get_test_dataset(config):
-    path = os.path.join(config.abspath, 'DCASE2021')
-    name = f'foa_dev_test_stft_480' + ('_norm' if config.norm else '')
-    name += '.joblib'
-    x = joblib.load(os.path.join(path, name))
-    y = joblib.load(os.path.join(path, f'foa_dev_val_label.joblib'))
+class Custom_dataset:
+    def __init__(self, config, mode='val') -> None:
+        self.path = os.path.join(config.abspath, 'DCASE2021')
+        self.config = config
+        self.mode = mode
+        self.load_raw_data()
 
-    hop_len =  20 * (x.shape[1] // y.shape[1])
-    config = vars(config)
-    config['frame_step'] = hop_len
-    config['resolution'] = x.shape[1] // y.shape[1]
-    config = argparse.Namespace(**config)
-    frame_num = 512
+    def load_raw_data(self):
+        self.x = joblib.load(os.path.join(self.path, f'foa_dev_{self.mode}_stft_480.joblib'))
+        self.y = joblib.load(os.path.join(self.path, f'foa_dev_{self.mode}_label.joblib'))
 
-    def frame(data):
-        return tf.signal.frame(data, frame_num, hop_len, axis=0, pad_end=True).numpy()
-    
-    x = np.stack(list(map(frame, x)), 0)
-
+    @staticmethod
     def generator(x, y):
         def _generator():
             for x_, y_ in zip(x, y):
                 yield x_, y_
         return _generator
 
-    dataset = tf.data.Dataset.from_generator(generator(x, y), output_signature=(
-        tf.TensorSpec((x.shape[1], frame_num, x.shape[-2], None), dtype=x.dtype),
-        tf.TensorSpec((y.shape[1], y.shape[-1]), dtype=y.dtype)
-    ))
-    dataset = apply_ops(dataset, get_intensity_vector)
-    dataset = apply_ops(dataset, split_total_labels_to_sed_doa)
+    def get(self):
+        frame_num = 512
+        x, y = self.x, self.y
 
-    return dataset.prefetch(AUTOTUNE)
+        if self.mode == 'val':
+            x = x.reshape([-1, x.shape[-2], x.shape[-1]])
+            y = y.reshape([-1, y.shape[-1]])
+            label_num = ceil(frame_num / (x.shape[0] / y.shape[0]))
+            frame_len = label_num * (x.shape[0] // y.shape[0])
+            x = np.pad(x, ((0, frame_len - (x.shape[0] % frame_len)), (0,0), (0,0)))
+            # frame_len 520, frame_num 512
+            x = x.reshape((-1, frame_len, x.shape[-2], x.shape[-1]))[:,:frame_num]
+            y = np.pad(y, ((0, label_num - (y.shape[0] % label_num)),(0,0)))
+            y = y.reshape((-1, label_num, y.shape[-1]))
 
+            dataset = tf.data.Dataset.from_generator(self.generator(x, y), output_signature=(
+                tf.TensorSpec((frame_num, x.shape[-2], None), dtype=x.dtype),
+                tf.TensorSpec((label_num, y.shape[-1]), dtype=y.dtype)
+            ))
+        elif self.mode == 'test':
+            hop_len =  20 * (x.shape[1] // y.shape[1])
+            config = vars(self.config)
+            config['frame_step'] = hop_len
+            config['resolution'] = x.shape[1] // y.shape[1]
+            self.config = argparse.Namespace(**config)
 
-def get_val_dataset(config):
-    path = os.path.join(config.abspath, 'DCASE2021')
-    name = f'foa_dev_val_stft_480' + ('_norm' if config.norm else '')
-    name += '.joblib'
-    x = joblib.load(os.path.join(path, name))
-    y = joblib.load(os.path.join(path, f'foa_dev_val_label.joblib'))
+            def frame(data):
+                return tf.signal.frame(data, frame_num, hop_len, axis=0, pad_end=True).numpy()
+            
+            x = np.stack(list(map(frame, x)), 0)
+            dataset = tf.data.Dataset.from_generator(self.generator(x, y), output_signature=(
+                tf.TensorSpec((x.shape[1], frame_num, x.shape[-2], None), dtype=x.dtype),
+                tf.TensorSpec((y.shape[1], y.shape[-1]), dtype=y.dtype)
+            ))
+        dataset = apply_ops(dataset, get_intensity_vector)
+        if self.mode == 'val':
+            dataset = dataset.batch(self.config.batch, drop_remainder=False)
+        dataset = apply_ops(dataset, split_total_labels_to_sed_doa)
 
-    x = x.reshape([-1, x.shape[-2], x.shape[-1]])
-    y = y.reshape([-1, y.shape[-1]])
-    frame_len = 512
-    label_num = ceil(frame_len / (x.shape[0] / y.shape[0]))
-    frame_num = label_num * (x.shape[0] // y.shape[0])
-    x = np.pad(x, ((0, frame_num - (x.shape[0] % frame_num)), (0,0), (0,0)))
-    # frame_size 520, frame step 512
-    x = x.reshape((-1, frame_num, x.shape[-2], x.shape[-1]))[:,:frame_len]
-    y = np.pad(y, ((0, label_num - (y.shape[0] % label_num)),(0,0)))
-    y = y.reshape((-1,label_num, y.shape[-1]))
-
-    def generator(x, y):
-        def _generator():
-            for x_, y_ in zip(x, y):
-                yield x_, y_
-        return _generator
-
-    dataset = tf.data.Dataset.from_generator(generator(x, y), output_signature=(
-        tf.TensorSpec((frame_len, x.shape[-2], None), dtype=x.dtype),
-        tf.TensorSpec((label_num, y.shape[-1]), dtype=y.dtype)
-    ))
-    dataset = apply_ops(dataset, get_intensity_vector)
-    dataset = dataset.batch(config.batch, drop_remainder=False)
-    dataset = apply_ops(dataset, split_total_labels_to_sed_doa)
-
-    return dataset.prefetch(AUTOTUNE)
+        return dataset.prefetch(AUTOTUNE)
 
 
 # only for mel-spectrogram dataset
@@ -445,10 +436,10 @@ def main(config):
                             sample_preprocessing=[
                                 # swap_channel,
                                 get_intensity_vector,
-                                # spec_augment,
-                            ], norm=config.norm)
-        valset = get_val_dataset(config)
-        testset = get_test_dataset(config)
+                                # make_spec_augment(100, 27, 2, 2),
+                            ])
+        valset = Custom_dataset(config, 'val')
+        testset = Custom_dataset(config, 'test')
 
     # --------------------------- mel dataset ------------------------------------
     elif config.data == 'mel':
@@ -481,7 +472,7 @@ def main(config):
     # test_ys = list(map(
     #     lambda x: split_total_labels_to_sed_doa(None, x)[-1], test_ys))
 
-    x, _ = [(x, y) for x, y in valset.take(1)][0]
+    x, _ = [(x, y) for x, y in valset.get().take(1)][0]
     input_shape = x.shape[1:]
     model = get_model(input_shape, config)
     model.summary()
@@ -524,9 +515,9 @@ def main(config):
         #     evaluate_fn(model, epoch)
             
         # train loop
-        train_iterloop(model, trainset, epoch, optimizer)
-        score = val_iterloop(model, valset, epoch)
-        test_iterloop(model, testset, epoch)
+        # train_iterloop(model, trainset, epoch, optimizer)
+        score = val_iterloop(model, valset.get(), epoch)
+        test_iterloop(model, testset.get(), epoch)
 
         
 
