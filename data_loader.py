@@ -10,7 +10,7 @@ import joblib
 
 from feature_extractor import *
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from data_utils import spec_augment
+from data_utils import make_spec_augment
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
@@ -471,7 +471,7 @@ if __name__ == '__main__':
     #         print(e)
     path = '/root/datasets/DCASE2021'
     sample_preprocessing = []
-    batch_preprocessing = [spec_augment]
+    batch_preprocessing = [make_spec_augment(100, 27, 2, 2)]
     trainsetloader = Pipline_Trainset_Dataloader(path, batch=32, sample_preprocessing=sample_preprocessing, batch_preprocessing=batch_preprocessing)
     trainset = next(trainsetloader)
     [None for _ in trainset]

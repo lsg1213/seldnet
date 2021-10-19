@@ -12,15 +12,10 @@ from numpy import inf
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
-import layers
-import losses
-import models
 from data_loader import *
-from metrics import * 
-from swa import SWA
+from metrics import SELDMetrics, calculate_seld_score
 from transforms import *
 from utils import adaptive_clip_grad, apply_kernel_regularizer
-from params import get_param
 
 args = argparse.ArgumentParser()
     
@@ -34,17 +29,19 @@ args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/meta
 
 
 # training
+args.add_argument('--decay', type=float, default=0.9)
+args.add_argument('--sed_th', type=float, default=0.3)
 args.add_argument('--lr', type=float, default=0.003)
 args.add_argument('--final_lr', type=float, default=0.0001)
 args.add_argument('--batch', type=int, default=256)
 args.add_argument('--agc', type=bool, default=False)
 args.add_argument('--epoch', type=int, default=60)
-args.add_argument('--lr_patience', type=int, default=80, 
+args.add_argument('--lr_patience', type=int, default=5, 
                     help='learning rate decay patience for plateau')
 args.add_argument('--patience', type=int, default=100, 
                     help='early stop patience')
-args.add_argument('--use_acs', type=bool, default=False)
-args.add_argument('--use_tfm', type=bool, default=False)
+args.add_argument('--use_acs', type=bool, default=True)
+args.add_argument('--use_tfm', type=bool, default=True)
 args.add_argument('--use_tdm', action='store_true')
 args.add_argument('--loop_time', type=int, default=5, 
                     help='times of train dataset iter for an epoch')
@@ -130,24 +127,21 @@ def get_model(input_shape):
     x = resnet(x, layers=[2, 2, 2, 2])
     x = keras.layers.AveragePooling2D((1,2))(x)
     x = keras.layers.Dropout(0.2)(x)
-    # x = conv_block(x, 2048, pool_size=(1, 1))
 
     x = keras.layers.TimeDistributed(keras.layers.Flatten())(x)
 
     x = keras.layers.Bidirectional(keras.layers.GRU(256, return_sequences=True), merge_mode='sum')(x)
     x = keras.layers.Bidirectional(keras.layers.GRU(256, return_sequences=True), merge_mode='sum')(x)
-    x = keras.layers.UpSampling1D(2)(x)
-    # x = keras.layers.Conv1DTranspose(256, 3, strides=2)(x)
-    # x = keras.layers.Conv1D(8, 1, use_bias=False, data_format='channels_first')(x)
+    x = keras.layers.Conv1DTranspose(256, 2, strides=2)(x)
 
     x = keras.layers.Dense(36)(x)
     x = keras.layers.Activation('tanh')(x)
     return keras.Model(inputs=inp, outputs=x)
 
-
-def get_accdoa_labels(accdoa_in, nb_classes):
+@tf.function
+def get_accdoa_labels(accdoa_in, nb_classes, sed_th=0.3):
     x, y, z = accdoa_in[:, :, :nb_classes], accdoa_in[:, :, nb_classes:2*nb_classes], accdoa_in[:, :, 2*nb_classes:]
-    sed = tf.cast(tf.sqrt(x**2 + y**2 + z**2) > 0.3, tf.float32)
+    sed = tf.cast(tf.sqrt(x**2 + y**2 + z**2) > sed_th, tf.float32)
     return sed, accdoa_in
 
 
@@ -202,7 +196,7 @@ def generate_iterloop(criterion, evaluator, writer,
         with tqdm(dataset) as pbar:
             for x, y in pbar:
                 preds, loss = step(model, x, y, optimizer)
-                y, preds = y, get_accdoa_labels(preds, preds.shape[-1] // 3)
+                y, preds = y, get_accdoa_labels(preds, preds.shape[-1] // 3, config.sed_th)
                 
                 evaluator.update_states(y, preds)
                 metric_values = evaluator.result()
@@ -270,7 +264,8 @@ def get_dataset(config, mode: str = 'train'):
         sample_transforms = [
             # random_ups_and_downs,
             # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
-            lambda x, y: (mask(x, axis=-2, max_mask_size=16, period=80), y),
+            # lambda x, y: (mask(x, axis=-2, max_mask_size=16, period=80), y),
+            make_spec_augment(16, 32, 2, 2)
         ]
     else:
         sample_transforms = []
@@ -287,72 +282,6 @@ def get_dataset(config, mode: str = 'train'):
         loop_time=config.loop_time
     )
     return dataset.prefetch(tf.data.experimental.AUTOTUNE)
-
-
-def ensemble_outputs(model, xs: list, 
-                     win_size=300, step_size=5, batch_size=256):
-    @tf.function
-    def predict(model, x, batch_size):
-        windows = tf.signal.frame(x, win_size, step_size, axis=0)
-
-        sed, doa = [], []
-        for i in range(int(np.ceil(windows.shape[0]/batch_size))):
-            y_p = model(windows[i*batch_size:(i+1)*batch_size], training=False)
-            s, d = get_accdoa_labels(y_p, y_p.shape[-1] // 3)
-            sed.append(s)
-            doa.append(d)
-        sed = tf.concat(sed, 0)
-        doa = tf.concat(doa, 0)
-
-        # windows to seq
-        total_counts = tf.signal.overlap_and_add(
-            tf.ones((sed.shape[0], win_size//step_size), dtype=sed.dtype),
-            1)[..., tf.newaxis]
-        sed = tf.signal.overlap_and_add(tf.transpose(sed, (2, 0, 1)), 1)
-        sed = tf.transpose(sed, (1, 0)) / total_counts
-        doa = tf.signal.overlap_and_add(tf.transpose(doa, (2, 0, 1)), 1)
-        doa = tf.transpose(doa, (1, 0)) / total_counts
-
-        return sed, doa
-
-    # assume 0th dim of each sample is time dim
-    seds = []
-    doas = []
-    
-    for x in xs:
-        sed, doa = predict(model, x, batch_size)
-        seds.append(sed)
-        doas.append(doa)
-
-    return list(zip(seds, doas))
-
-
-def generate_evaluate_fn(test_xs, test_ys, evaluator, batch_size=256,
-                         writer=None):
-    def evaluate_fn(model, epoch):
-        start = time.time()
-        evaluator.reset_states()
-        e_outs = ensemble_outputs(model, test_xs, batch_size=batch_size)
-
-        for y, pred in zip(test_ys, e_outs):
-            evaluator.update_states(y, pred)
-
-        metric_values = evaluator.result()
-        seld_score = calculate_seld_score(metric_values).numpy()
-        er, f, der, derf = list(map(lambda x: x.numpy(), metric_values))
-
-        if writer is not None:
-            writer.add_scalar('ENS_T/ER', er, epoch)
-            writer.add_scalar('ENS_T/F', f, epoch)
-            writer.add_scalar('ENS_T/DER', der, epoch)
-            writer.add_scalar('ENS_T/DERF', derf, epoch)
-            writer.add_scalar('ENS_T/seldScore', seld_score, epoch)
-        print('ensemble outputs')
-        print(f'ER: {er:4f}, F: {f:4f}, DER: {der:4f}, DERF: {derf:4f}, '
-              f'SELD: {seld_score:4f} '
-              f'({time.time()-start:.4f} secs)')
-        return seld_score, metric_values
-    return evaluate_fn
 
 
 def main(config):
@@ -394,17 +323,16 @@ def main(config):
 
     best_score = inf
     evaluator = SELDMetrics(
-        doa_threshold=config.lad_doa_thresh, n_classes=n_classes, sed_th=0.3)
+        doa_threshold=config.lad_doa_thresh, n_classes=n_classes, sed_th=config.sed_th)
 
     train_iterloop = generate_iterloop(
-        criterion, evaluator, writer, 'train', 
-        config=config)
+        criterion, evaluator, writer, 'train', config=config)
     val_iterloop = generate_iterloop(
-        criterion, evaluator, writer, 'val')
+        criterion, evaluator, writer, 'val', config=config)
     test_iterloop = generate_iterloop(
-        criterion, evaluator, writer, 'test')
+        criterion, evaluator, writer, 'test', config=config)
 
-    decay_rate = (config.final_lr / config.lr) ** (1 / config.epoch)
+    lr_decay_patience = 0
     for epoch in range(config.epoch):
 
         # train loop
@@ -412,8 +340,7 @@ def main(config):
         score = val_iterloop(model, valset, epoch)
         test_iterloop(model, testset, epoch)
 
-        print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * decay_rate).numpy():.3}')
-        optimizer.learning_rate = optimizer.learning_rate * decay_rate
+        optimizer.learning_rate = optimizer.learning_rate * 0.9
         if best_score > score:
             os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
             best_score = score
@@ -421,6 +348,13 @@ def main(config):
                 model, 
                 os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
                 include_optimizer=False)
+        else:
+            lr_decay_patience += 1
+            print(f'lr_decay_patience: {lr_decay_patience}')
+            if lr_decay_patience >= config.lr_patience and config.decay != 1:
+                print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * 0.9).numpy():.3}')
+                optimizer.learning_rate = optimizer.learning_rate * config.decay
+                lr_decay_patience = 0
 
     # end of training
     print(f'epoch: {epoch}')
