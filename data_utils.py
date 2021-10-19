@@ -117,16 +117,17 @@ def swap_channel(x, y):
     return x, y
 
 
-@tf.function
-def spec_augment(x, y):
-    # x = (window, freq, chan)
-    tau = tf.shape(x)[0]
+def make_spec_augment(time_len, freq_len, time_num, freq_num):
+    @tf.function
+    def spec_augment(x, y):
+        # x = (window, freq, chan)
+        tau = tf.shape(x)[0]
 
-    x = frequency_masking(x)
-    x, y = time_masking(x, y, tau=tau)
+        x = frequency_masking(x, freq_len, freq_num)
+        x, y = time_masking(x, y, tau, time_len, time_num)
 
-    return x, y
-    
+        return x, y
+    return spec_augment
 
 def biquad_equalizer(sampling_rate, central_freq=[100., 6000.], g=[-8.,8.], Q=[1.,9.]):
     '''
