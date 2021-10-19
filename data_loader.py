@@ -155,7 +155,6 @@ def seldnet_data_to_dataloader(features: [list, tuple],
     # for each 5 input time slices, a single label time slices was designated
     # features' shape [time_f, freq, chan] -> [time_l, resolution, freq, chan]
     features = np.reshape(features, (labels.shape[0], -1, *features.shape[1:]))
-
     # windowing
     n_samples = features.shape[0] // label_window_size
     dataset = tf.data.Dataset.from_tensor_slices((features, labels))
@@ -350,8 +349,8 @@ def apply_ops(dataset, operations):
 
 
 class Pipline_Trainset_Dataloader:
-    def __init__(self, path, batch, frame_num=512, frame_len=0.02, iters=10000, accdoa=True, sample_preprocessing=[], batch_preprocessing=[], norm=True):
-        name = f'foa_dev_train_stft_480' + ('_norm' if norm else '')
+    def __init__(self, path, batch, frame_num=512, iters=10000, sample_preprocessing=[], batch_preprocessing=[]):
+        name = f'foa_dev_train_stft_480'
         name += '.joblib'
         self.x = joblib.load(os.path.join(path, name)) # (sample_num, frame_num, freqs, chan)
         self.y = joblib.load(os.path.join(path, 'foa_dev_train_label.joblib')) # (sample_num, label_frame_num, SED+DOA)
@@ -391,7 +390,8 @@ class Pipline_Trainset_Dataloader:
         for i in range(self.iters):
             x, y = self.get_sliced_data()
             for sample_preprocess in self.sample_preprocessing:
-                x, y = sample_preprocess(x, y)
+                if sample_preprocess is not None:
+                    x, y = sample_preprocess(x, y)
             yield x, y
 
     def __next__(self):

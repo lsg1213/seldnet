@@ -159,12 +159,54 @@ def biquad_equalizer(sampling_rate, central_freq=[100., 6000.], g=[-8.,8.], Q=[1
     
     return _band_biquad_equalizer
 
-@tf.function
-def stft(wav):
-    wav = tf.transpose(wav, [1,0])
-    out = tf.signal.stft(wav, 480, 240, 480, pad_end=True)
-    return out
 
+def foa_intensity_vectors_tf(spectrogram, eps=1e-8):
+    # complex_specs: [chan, time, freq]
+    conj_zero = tf.math.conj(spectrogram[0])
+    IVx = tf.math.real(conj_zero * spectrogram[3])
+    IVy = tf.math.real(conj_zero * spectrogram[1])
+    IVz = tf.math.real(conj_zero * spectrogram[2])
+
+    norm = tf.math.sqrt(IVx**2 + IVy**2 + IVz**2)
+    norm = tf.math.maximum(norm, eps)
+    IVx = IVx / norm
+    IVy = IVy / norm
+    IVz = IVz / norm
+
+    # apply mel matrix without db ...
+    return tf.stack([IVx, IVy, IVz], 0)
+
+
+def make_feature(feature, feature_config):
+    def make_stft(nfft, hop):
+        @tf.function
+        def stft(wav):
+            wav = tf.transpose(wav, [1,0])
+            out = tf.signal.stft(wav, nfft, hop, nfft, pad_end=True)
+            return out
+        return stft
+
+    def make_mel(nfft, hop, mel_bin, intensity_vector, sr=24000):
+        mel_mat = tf.signal.linear_to_mel_weight_matrix(num_mel_bins=mel_bin,
+                                                        num_spectrogram_bins=nfft//2+1,
+                                                        sample_rate=sr,
+                                                        lower_edge_hertz=0,
+                                                        upper_edge_hertz=sr//2)
+        @tf.function
+        def mel(wav):
+            wav = tf.transpose(wav, [1,0])
+            feat = tf.signal.stft(wav, nfft, hop, nfft, pad_end=True)
+            if intensity_vector:
+                foa = foa_intensity_vectors_tf(feat)
+                foa = tf.matmul(foa, mel_mat)
+            feat = tf.math.abs(feat)
+            return tf.concat([tf.matmul(feat, mel_mat), foa], 0)
+        return mel
+
+    if feature == 'stft':
+        return make_stft(*feature_config)
+    elif feature == 'mel':
+        return make_mel(*feature_config)
 
 if __name__ == '__main__':
     from data_loader import load_wav_and_label
@@ -176,20 +218,32 @@ if __name__ == '__main__':
     modes = ('train', 'val', 'test')
     path = '/root/datasets/DCASE2021'
     x_ = []
+    fft = 512
+    hop = 300
+    feature = 'mel' # stft, mel
+    mel_bin = 128
+    feature_config = [fft, hop]
+    if feature == 'mel':
+        feature_config.append(mel_bin)
+        feature_config.append(True)
     for mode in modes:
         print(mode)
         x, y, sr = load_wav_and_label(os.path.join(path, 'foa_dev'),
                                 os.path.join(path, 'metadata_dev'),
                                 mode=mode)
-        x = np.stack([stft(i).numpy() for i in tqdm(x)], 0).transpose(0,2,3,1)
+
+        x = np.stack([make_feature(feature, feature_config)(i).numpy() for i in tqdm(x)], 0).transpose(0,2,3,1)
         y = np.stack(y, 0)
-        joblib.dump(x, os.path.join(path, f'foa_dev_{mode}_stft_480.joblib'))
+        joblib.dump(x, os.path.join(path, f'foa_dev_{mode}_{feature}_{fft}.joblib'))
         joblib.dump(y, os.path.join(path, f'foa_dev_{mode}_label.joblib'))
-        x_.append(x)
-    x_ = np.concatenate(x_, 0)
-    mean = x_.mean(0)
-    std = x_.std(0)
-    for mode in modes:
-        print(mode)
-        x = joblib.load(os.path.join(path, f'foa_dev_{mode}_stft_480.joblib'))
-        joblib.dump((x - mean) / std, os.path.join(path, f'foa_dev_{mode}_stft_480_norm.joblib'))
+        if feature == 'mel':
+            x_.append(x)
+            
+    if feature == 'mel':
+        x_ = np.concatenate(x_, 0)
+        mean = x_.mean((0,1), keepdims=True)
+        std = x_.std((0,1), keepdims=True)
+        for mode in modes:
+            print(mode)
+            x = joblib.load(os.path.join(path, f'foa_dev_{mode}_mel_{fft}.joblib'))
+            joblib.dump((x - mean) / np.maximum(std, 1e-3), os.path.join(path, f'foa_dev_{mode}_mel_{fft}_norm.joblib'))

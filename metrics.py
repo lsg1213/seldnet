@@ -31,10 +31,11 @@ def get_objective_score(outputs, weights=[1,1,1]):
 
 
 class SELDMetrics:
-    def __init__(self, doa_threshold=20, block_size=10, n_classes=14):
+    def __init__(self, doa_threshold=20, block_size=10, n_classes=14, sed_th=0.5):
         self.doa_threshold = doa_threshold
         self.block_size = block_size
         self.n_classes = n_classes
+        self.sed_th = sed_th
         self.reset_states()
 
     def reset_states(self):
@@ -103,7 +104,7 @@ class SELDMetrics:
     def update_block_states(self, y_true_block, y_pred_block):
         sed_true, doa_true = y_true_block
         sed_pred, doa_pred = y_pred_block
-        sed_pred = tf.cast(sed_pred > 0.5, sed_pred.dtype)
+        sed_pred = tf.cast(sed_pred > self.sed_th, sed_pred.dtype)
 
         if len(sed_true.shape) == 2:
             sed_true = sed_true[tf.newaxis, :]
