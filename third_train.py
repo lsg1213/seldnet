@@ -340,7 +340,6 @@ def main(config):
         score = val_iterloop(model, valset, epoch)
         test_iterloop(model, testset, epoch)
 
-        optimizer.learning_rate = optimizer.learning_rate * 0.9
         if best_score > score:
             os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
             best_score = score
@@ -348,6 +347,7 @@ def main(config):
                 model, 
                 os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
                 include_optimizer=False)
+            lr_decay_patience = 0
         else:
             lr_decay_patience += 1
             print(f'lr_decay_patience: {lr_decay_patience}')
