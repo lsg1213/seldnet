@@ -33,7 +33,7 @@ args.add_argument('--decay', type=float, default=0.9)
 args.add_argument('--sed_th', type=float, default=0.3)
 args.add_argument('--lr', type=float, default=0.003)
 args.add_argument('--final_lr', type=float, default=0.0001)
-args.add_argument('--batch', type=int, default=256)
+args.add_argument('--batch', type=int, default=512)
 args.add_argument('--agc', type=bool, default=False)
 args.add_argument('--epoch', type=int, default=60)
 args.add_argument('--lr_patience', type=int, default=5, 
@@ -43,6 +43,7 @@ args.add_argument('--patience', type=int, default=100,
 args.add_argument('--use_acs', type=bool, default=True)
 args.add_argument('--use_tfm', type=bool, default=True)
 args.add_argument('--use_tdm', action='store_true')
+args.add_argument('--schedule', action='store_true')
 args.add_argument('--loop_time', type=int, default=5, 
                     help='times of train dataset iter for an epoch')
 args.add_argument('--lad_doa_thresh', type=int, default=20)
@@ -288,6 +289,8 @@ def main(config):
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     n_classes = 12
     name = '_'.join(['2', str(config.lr), str(config.final_lr)])
+    if config.schedule:
+        name += '_schedule'
     config.name = name + '_' + config.name
 
     # data load
@@ -349,12 +352,17 @@ def main(config):
                 include_optimizer=False)
             lr_decay_patience = 0
         else:
-            lr_decay_patience += 1
-            print(f'lr_decay_patience: {lr_decay_patience}')
+            if not config.schedule:
+                lr_decay_patience += 1
+                print(f'lr_decay_patience: {lr_decay_patience}')
             if lr_decay_patience >= config.lr_patience and config.decay != 1:
-                print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * 0.9).numpy():.3}')
+                print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * config.decay).numpy():.3}')
                 optimizer.learning_rate = optimizer.learning_rate * config.decay
                 lr_decay_patience = 0
+        if config.schedule:
+            decay_coefficient = (config.final_lr / config.lr) ** (1 / config.epoch)
+            print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * decay_coefficient).numpy():.3}')
+            optimizer.learning_rate = optimizer.learning_rate * decay_coefficient
 
     # end of training
     print(f'epoch: {epoch}')
