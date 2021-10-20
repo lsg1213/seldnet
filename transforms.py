@@ -44,35 +44,35 @@ def mask(specs, axis, max_mask_size=None, period=100, n_mask=1):
 
 
 def simple_mask(specs, axis, max_mask_size=None, n_mask=1):
-     def make_shape(size):
-         # returns (1, ..., size, ..., 1)
-         shape = [1] * len(specs.shape)
-         shape[axis] = size
-         return tuple(shape)
+    def make_shape(size):
+        # returns (1, ..., size, ..., 1)
+        shape = [1] * len(specs.shape)
+        shape[axis] = size
+        return tuple(shape)
 
-     total = tf.shape(specs)[axis]
-     mask = tf.ones(make_shape(total), dtype=specs.dtype)
+    total = tf.shape(specs)[axis]
+    mask = tf.ones(make_shape(total), dtype=specs.dtype)
 
-     if max_mask_size is None:
-         max_mask_size = total
+    if max_mask_size is None:
+        max_mask_size = total
 
-     def apply_random_mask(mask):
-         size = tf.random.uniform([], maxval=max_mask_size, dtype=tf.int32)
-         offset = tf.random.uniform([], maxval=total-size, dtype=tf.int32)
+    def apply_random_mask(mask):
+        size = tf.random.uniform([], maxval=max_mask_size, dtype=tf.int32)
+        offset = tf.random.uniform([], maxval=total-size, dtype=tf.int32)
 
-         mask *= tf.concat(
-             (tf.ones(shape=make_shape(offset), dtype=mask.dtype),
-              tf.zeros(shape=make_shape(size), dtype=mask.dtype),
-              tf.ones(shape=make_shape(total-size-offset), dtype=mask.dtype)),
-             axis=axis)
-         return mask
+        mask *= tf.concat(
+            (tf.ones(shape=make_shape(offset), dtype=mask.dtype),
+            tf.zeros(shape=make_shape(size), dtype=mask.dtype),
+            tf.ones(shape=make_shape(total-size-offset), dtype=mask.dtype)),
+            axis=axis)
+        return mask
 
-     i = tf.constant(0)
-     cond = lambda i, m: i < n_mask
-     body = lambda i, m: (i+1, apply_random_mask(m))
-     _, mask = tf.while_loop(cond, body, (i, mask))
+    i = tf.constant(0)
+    cond = lambda i, m: i < n_mask
+    body = lambda i, m: (i+1, apply_random_mask(m))
+    _, mask = tf.while_loop(cond, body, (i, mask))
 
-     return specs * mask
+    return specs * mask
 
 
 def foa_intensity_vec_aug(x, y):
@@ -110,6 +110,20 @@ def foa_intensity_vec_aug(x, y):
     
     y = tf.concat([y[..., :-3, :], cartesian], axis=-2)
     y = tf.reshape(y, [-1] + [*y.shape[1:-2]] + [4*y.shape[-1]])
+
+    return x, y
+
+
+# https://arxiv.org/pdf/1910.04388.pdf table 1
+def sixteen_pattern_spatial_aug(x, y):
+    # x : [batch, time, freq, 7]
+    # y : [batch, time, 4*n_classes]
+    x = tf.identity(x)
+    y = tf.identity(y)
+    batch_size = tf.shape(x)[0]
+
+    # [batch, time, 4*n_classes] to [batch, time, 4, n_classes]
+    y = tf.reshape(y, [-1] + [*y.shape[1:-1]] + [4, y.shape[-1]//4])
 
     return x, y
 
