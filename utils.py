@@ -356,12 +356,18 @@ def convert_output_format_cartesian_to_polar(in_dict):
 
 
 def apply_kernel_regularizer(model, kernel_regularizer):
-    model = tf.keras.models.clone_model(model)
+    try:
+        model = tf.keras.models.clone_model(model)
+    except:
+        pass
     for layer in model.layers:
         if hasattr(layer, 'kernel_regularizer'):
             layer.kernel_regularizer = kernel_regularizer
 
-    model = tf.keras.models.clone_model(model)
+    try:
+        model = tf.keras.models.clone_model(model)
+    except:
+        pass
     return model
 
 def convert_output_format_polar_to_cartesian(in_dict):
