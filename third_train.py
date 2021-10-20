@@ -33,7 +33,7 @@ args.add_argument('--decay', type=float, default=0.9)
 args.add_argument('--sed_th', type=float, default=0.3)
 args.add_argument('--lr', type=float, default=0.003)
 args.add_argument('--final_lr', type=float, default=0.0001)
-args.add_argument('--batch', type=int, default=512)
+args.add_argument('--batch', type=int, default=256)
 args.add_argument('--agc', type=bool, default=False)
 args.add_argument('--epoch', type=int, default=60)
 args.add_argument('--lr_patience', type=int, default=5, 
@@ -43,7 +43,7 @@ args.add_argument('--patience', type=int, default=100,
 args.add_argument('--use_acs', type=bool, default=True)
 args.add_argument('--use_tfm', type=bool, default=True)
 args.add_argument('--use_tdm', action='store_true')
-args.add_argument('--schedule', action='store_true')
+args.add_argument('--schedule', type=bool, default=True)
 args.add_argument('--loop_time', type=int, default=5, 
                     help='times of train dataset iter for an epoch')
 args.add_argument('--lad_doa_thresh', type=int, default=20)
@@ -312,6 +312,9 @@ def main(config):
     x, _ = [(x, y) for x, y in valset.take(1)][0]
     input_shape = x.shape[1:]
     model = get_model(input_shape)
+    kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
+    model = apply_kernel_regularizer(model, kernel_regularizer)
+
     model.summary()
 
     optimizer = keras.optimizers.Adam(config.lr)
@@ -360,9 +363,14 @@ def main(config):
                 optimizer.learning_rate = optimizer.learning_rate * config.decay
                 lr_decay_patience = 0
         if config.schedule:
-            decay_coefficient = (config.final_lr / config.lr) ** (1 / config.epoch)
-            print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * decay_coefficient).numpy():.3}')
-            optimizer.learning_rate = optimizer.learning_rate * decay_coefficient
+            # decay_coefficient = (config.final_lr / config.lr) ** (1 / config.epoch)
+            # print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * decay_coefficient).numpy():.3}')
+            # optimizer.learning_rate = optimizer.learning_rate * decay_coefficient
+            decay_coefficient = (config.final_lr - config.lr) / config.epoch
+            print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate + decay_coefficient).numpy():.3}')
+            optimizer.learning_rate = optimizer.learning_rate + decay_coefficient
+
+            
 
     # end of training
     print(f'epoch: {epoch}')
