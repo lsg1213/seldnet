@@ -26,6 +26,7 @@ args.add_argument('--resume', action='store_true')
 args.add_argument('--abspath', type=str, default='/root/datasets')
 args.add_argument('--output_path', type=str, default='./output')
 args.add_argument('--ans_path', type=str, default='/root/datasets/DCASE2021/metadata_dev/')
+args.add_argument('--norm', type=bool, default=True)
 
 
 # training
@@ -259,7 +260,11 @@ def random_ups_and_downs(x, y):
 
 def get_dataset(config, mode: str = 'train'):
     path = os.path.join(config.abspath, 'DCASE2021/')
-    x = joblib.load(os.path.join(path, f'foa_dev_{mode}_mel_512.joblib'))
+    name = os.path.join(path, f'foa_dev_{mode}_mel_512')
+    if config.norm:
+        name += '_norm'
+    name += '.joblib'
+    x = joblib.load(name)
     y = joblib.load(os.path.join(path, f'foa_dev_{mode}_label.joblib'))
     if config.use_tfm and mode == 'train':
         sample_transforms = [
@@ -291,6 +296,8 @@ def main(config):
     name = '_'.join(['2', str(config.lr), str(config.final_lr)])
     if config.schedule:
         name += '_schedule'
+    if config.norm:
+        name += '_norm'
     config.name = name + '_' + config.name
 
     # data load
