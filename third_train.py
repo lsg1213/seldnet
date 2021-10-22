@@ -277,7 +277,7 @@ def get_dataset(config, mode: str = 'train'):
         sample_transforms = []
     batch_transforms = [split_total_labels_to_sed_doa]
     if config.use_acs and mode == 'train':
-        batch_transforms.insert(0, sixteen_pattern_spatial_aug)
+        batch_transforms.insert(0, foa_intensity_vec_aug)
     dataset = seldnet_data_to_dataloader(
         x, y,
         train= mode == 'train',
