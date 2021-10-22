@@ -266,18 +266,18 @@ def get_dataset(config, mode: str = 'train'):
             # random_ups_and_downs,
             # lambda x, y: (mask(x, axis=-2, max_mask_size=8, n_mask=6), y),
             # lambda x, y: (mask(x, axis=-2, max_mask_size=16, period=80), y),
-            make_spec_augment(16, 32, 2, 2)
+            make_spec_augment(100, 27, 2, 2)
         ]
     else:
         sample_transforms = []
     batch_transforms = [split_total_labels_to_sed_doa]
     if config.use_acs and mode == 'train':
-        batch_transforms.insert(0, foa_intensity_vec_aug)
+        batch_transforms.insert(0, sixteen_pattern_spatial_aug)
     dataset = seldnet_data_to_dataloader(
         x, y,
         train= mode == 'train',
         batch_transforms=batch_transforms,
-        label_window_size=10,
+        label_window_size=40,
         batch_size=config.batch,
         sample_transforms=sample_transforms,
         loop_time=config.loop_time
@@ -379,7 +379,7 @@ def main(config):
 if __name__=='__main__':
     main(args.parse_args())
     # os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
-    # input_shape = [80, 128, 7]
+    # input_shape = [320, 128, 7]
     # model = get_model(input_shape)
     # model.summary()
     # from model_flop import get_flops
