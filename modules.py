@@ -61,9 +61,9 @@ def DPRNN_stage(model_config: dict):
 def single_RNN_block(inp, units, dropout=0., bidirectional=False, rnn='GRU'):
     RNN = getattr(tf.keras.layers, rnn)(units, dropout=dropout, return_sequences=True)
     if bidirectional:
-        x = tf.keras.layers.Bidirectional(RNN)(inp)
+        x = tf.keras.layers.TimeDistributed(tf.keras.layers.Bidirectional(RNN))(inp)
     else:
-        x = RNN(inp)
+        x = tf.keras.layers.TimeDistributed(RNN)(inp)
     x = tf.keras.layers.Dense(inp.shape[-1])(x)
     return x
 
@@ -77,20 +77,16 @@ def DPRNN_block(model_config: dict):
     def block(x):
         output = x
 
-        dim1, dim2, N = x.shape[1:]
-        row_input = tf.keras.layers.Permute([2, 1, 3])(x) # B, dim2, dim1, N
-        row_input = tf.reshape(row_input, [-1, dim1, N])
-        row_output = single_RNN_block(row_input, units, dropout=dropout, bidirectional=bidirectional, rnn=rnn)
-        row_output = tf.reshape(row_output, [-1,dim2,dim1,N])
+        row_input = tf.keras.layers.Permute([2, 1, 3])(output) # B, dim2, dim1, N
+        row_output = single_RNN_block(row_input, units, dropout=dropout, bidirectional=True)
         row_output = tf.keras.layers.Permute([2, 1, 3])(row_output)
         row_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(row_output)
-        
-        col_input = tf.reshape(x, [-1, dim2, N])
-        col_output = single_RNN_block(col_input, units, dropout=dropout, bidirectional=bidirectional, rnn=rnn)
-        col_output = tf.reshape(col_output, [-1,dim1,dim2,N])
+        output += row_output
+
+        col_output = single_RNN_block(output, units, dropout=dropout, bidirectional=True)
         col_output = tfa.layers.GroupNormalization(1, epsilon=1e-8)(col_output)
 
-        output += row_output + col_output
+        output += col_output
         return output # (B, dim1, dim2, output_size)
     return block
 

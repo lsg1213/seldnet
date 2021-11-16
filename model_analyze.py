@@ -15,7 +15,10 @@ def delete_unit(search_space, name, unit, writer):
     check = False
 
     if isinstance(unit, str):
-        unit = json.loads(unit)
+        try:
+            unit = json.loads(unit)
+        except json.decoder.JSONDecodeError:
+            pass
 
     for dimension in search_space[name[0]].keys():
         if dimension == 'num':
@@ -92,7 +95,10 @@ def stage_filter(name, unit):
 
 def unit_filter(name, unit):
     if isinstance(unit, str):
-        unit = json.loads(unit)
+        try:
+            unit = json.loads(unit)
+        except json.decoder.JSONDecodeError:
+            pass
     def _stage_filter(result):
         return result['config'][name[0]][name[1]] != unit
     return _stage_filter
