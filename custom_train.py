@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import *
+from tensorflow.keras.callbacks import *
 import tensorflow_addons as tfa
 from glob import glob
 from numpy import inf
@@ -36,11 +37,11 @@ class ARGS:
         self.set('--norm', type=bool, default=True)
         self.set('--decay', type=float, default=0.9)
         self.set('--sed_th', type=float, default=0.3)
-        self.set('--lr', type=float, default=0.003)
+        self.set('--lr', type=float, default=0.001)
         self.set('--final_lr', type=float, default=0.0001)
-        self.set('--batch', type=int, default=256)
+        self.set('--batch', type=int, default=8)
         self.set('--agc', type=bool, default=False)
-        self.set('--epoch', type=int, default=60)
+        self.set('--epoch', type=int, default=100)
         self.set('--lr_patience', type=int, default=5, help='learning rate decay patience for plateau')
         self.set('--patience', type=int, default=100, help='early stop patience')
         self.set('--use_acs', type=bool, default=True)
@@ -272,7 +273,43 @@ def random_ups_and_downs(x, y):
     return x, y
 
 
-# https://github.com/qiuqiangkong/audioset_tagging_cnn/tree/master/pytorch
+class CustomModel(tf.keras.Model):
+    def __init__(self, **kwargs) -> None:
+        super(CustomModel, self).__init__(**kwargs)
+
+    def train_step(self, data):
+        # Unpack the data. Its structure depends on your model and
+        # on what you pass to `fit()`.
+        x, y, splited_x, splited_y = data
+        # splited_y = (batch, time, one_hot class, 3)
+
+        resolution = x.shape[1] // y[0].shape[1]
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)  # Forward pass
+            
+            masked_x = x[...,tf.newaxis] * y_pred # (batch, frame_num, freq, chan=8, class=12)
+            results = tf.zeros_like(masked_x)
+            for i in range(splited_x.shape[-1]):
+                sy, sx = splited_y[0][...,i,:], splited_x[...,i]
+                results += sx[..., tf.newaxis] * tf.repeat(sy, resolution, axis=1)[..., tf.newaxis, tf.newaxis, :]
+            loss = self.compiled_loss(masked_x, results)
+
+        # Compute gradients
+        trainable_vars = self.trainable_variables
+        
+        gradients = tape.gradient(loss, trainable_vars)
+        # gradients = adaptive_clip_grad(self.trainable_variables, gradients)
+        # Update weights
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        # Update metrics (includes the metric that tracks the loss)
+        
+        self.compiled_metrics.update_state(x, y_pred)
+
+        # Return a dict mapping metric names to current value
+        return {m.name: m.result() for m in self.metrics}
+
+
+# https://github.com/JusperLee/Looking-to-Listen-at-the-Cocktail-Party/blob/master/model/AO_model/AO_model.py
 def get_model(input_shape):
     inp = tf.keras.layers.Input(shape = input_shape)
     class_num = 12
@@ -340,6 +377,7 @@ def get_model(input_shape):
 
     AVfusion = TimeDistributed(Flatten())(conv15)
 
+    # lstm = Bidirectional(LSTM(200, return_sequences=True),merge_mode='sum')(AVfusion)
     lstm = Bidirectional(LSTM(400, return_sequences=True),merge_mode='sum')(AVfusion)
 
     fc1 = Dense(600, name="fc1", activation='relu', kernel_initializer=tf.keras.initializers.HeNormal(seed=27))(lstm)
@@ -348,20 +386,19 @@ def get_model(input_shape):
 
     complex_mask = Dense(inp.shape[-2] * inp.shape[-1] * class_num, name="complex_mask", kernel_initializer=tf.keras.initializers.GlorotUniform(seed=87))(fc3)
 
-    complex_mask_out = Reshape((inp.shape[-3], inp.shape[-2], -1))(complex_mask)
-    return tf.keras.Model(inputs=inp, outputs=complex_mask_out)
+    complex_mask_out = Reshape((inp.shape[-3], inp.shape[-2], -1, class_num))(complex_mask)
+    return CustomModel(inputs=inp, outputs=complex_mask_out)
 
 
-@tf.function
 def seperate_single_class(x, y):
     resolution = x.shape[1] // y.shape[1]
     class_num = y.shape[-1] // 4
 
     classy = y[..., :class_num]
-    classy = tf.repeat(classy, resolution, axis=1)
+    classy = np.repeat(classy, resolution, axis=1)
 
-    x = tf.gather_nd(x, tf.where(tf.reduce_sum(classy, axis=-1) == 1))
-    y = tf.gather_nd(y, tf.where(tf.reduce_sum(y[..., :class_num], axis=-1) == 1))
+    x = x[classy.sum(-1) == 1]
+    y = y[y[..., :class_num].sum(-1) == 1]
     return x, y
 
 
@@ -384,27 +421,35 @@ class Pipeline_Dataset:
 
     def seperate_with_class(self):
         for i in range(self.class_num):
-            setattr(self, f'x_{i}', tf.gather_nd(self.x, tf.where(tf.repeat(self.y[...,i], self.resolution, axis=0) == 1)))
-            setattr(self, f'y_{i}', tf.gather_nd(self.y, tf.where(self.y[...,i] == 1)))
+            setattr(self, f'x_{i}', self.x[np.repeat(self.y[...,i], self.resolution, axis=0) == 1])
+            setattr(self, f'y_{i}', self.y[self.y[...,i] == 1])
         del self.x, self.y
 
     def gen(self):
         while True:
             x1_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
             x2_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
+            x3_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
             while x1_class == x2_class:
                 x2_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
+            while x1_class == x3_class or x2_class == x3_class:
+                x3_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
 
             x1 = getattr(self, f'x_{x1_class}')
             x2 = getattr(self, f'x_{x2_class}')
+            x3 = getattr(self, f'x_{x3_class}')
             y1 = getattr(self, f'y_{x1_class}')
             y2 = getattr(self, f'y_{x2_class}')
+            y3 = getattr(self, f'y_{x3_class}')
             x1_offset = tf.random.uniform((), minval=0, maxval=x1.shape[0] - self.frame_num, dtype=tf.int32)
             x2_offset = tf.random.uniform((), minval=0, maxval=x2.shape[0] - self.frame_num, dtype=tf.int32)
+            x3_offset = tf.random.uniform((), minval=0, maxval=x3.shape[0] - self.frame_num, dtype=tf.int32)
             x1 = x1[x1_offset:x1_offset+self.frame_num]
             x2 = x2[x2_offset:x2_offset+self.frame_num]
+            x3 = x3[x3_offset:x3_offset+self.frame_num]
             y1 = y1[x1_offset // self.resolution: x1_offset // self.resolution + self.label_len]
             y2 = y2[x2_offset // self.resolution: x2_offset // self.resolution + self.label_len]
+            y3 = y3[x3_offset // self.resolution: x3_offset // self.resolution + self.label_len]
 
             mask1_offset = tf.random.uniform((), minval=0, maxval=y1.shape[0] // 2, dtype=tf.int32)
             mask1_len = tf.random.uniform((), minval=y1.shape[0] // 2, maxval=y1.shape[0] - mask1_offset, dtype=tf.int32)
@@ -425,17 +470,32 @@ class Pipeline_Dataset:
             ], 0)
             y2 *= mask2
             x2 *= tf.repeat(mask2[..., tf.newaxis], self.resolution, axis=0)[:x2.shape[0]]
+
+            mask3_offset = tf.random.uniform((), minval=0, maxval=y3.shape[0] // 2, dtype=tf.int32)
+            mask3_len = tf.random.uniform((), minval=y3.shape[0] // 2, maxval=y3.shape[0] - mask3_offset, dtype=tf.int32)
+            mask3 = tf.concat([
+                tf.zeros([mask3_offset, 1], dtype=y3.dtype),
+                tf.ones([mask3_len, 1], dtype=y3.dtype),
+                tf.zeros([y3.shape[0] - mask3_offset - mask3_len, 1], dtype=y3.dtype)
+            ], 0)
+            y3 *= mask3
+            x3 *= tf.repeat(mask3[..., tf.newaxis], self.resolution, axis=0)[:x3.shape[0]]
             
             snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
             x = x1 + 10 ** (snr / 20) * x2
-            y = y1 + y2
-            
-            yield x, y
+            snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
+            x += 10 ** (snr / 20) * x3
+            y = y1 + y2 + y3
+            yield x, y, tf.stack([x1, x2, x3], -1), tf.stack([y1, y2, y3], -2)
 
     def get(self):
-        return tf.data.Dataset.from_generator(self.gen(), 
-        output_signature=[tf.TensorSpec(shape=(self.frame_num, self.freq_num, self.chan), dtype=tf.float32), 
-                          tf.TensorSpec(shape=(self.label_len, self.class_num * 4), dtype=tf)])
+        return tf.data.Dataset.from_generator(self.gen,
+            (tf.float32, tf.float32, tf.float32, tf.float32), 
+            (tf.TensorShape([self.frame_num, self.freq_num, self.chan]), 
+             tf.TensorShape([self.label_len, self.class_num * 4]), 
+             tf.TensorShape([self.frame_num, self.freq_num, self.chan, 3]),
+             tf.TensorShape([self.label_len, 3, self.class_num * 4]))
+        ).prefetch(AUTOTUNE)
 
 
 def get_maskdata(config, mode: str = 'train'):
@@ -447,10 +507,12 @@ def get_maskdata(config, mode: str = 'train'):
     y = joblib.load(os.path.join(path, f'foa_dev_{mode}_label.joblib'))
     
     x = np.stack(x, 0).transpose(0,2,3,1)
-    dataset = Pipeline_Dataset(config, x, y).get() # next 할 때마다 합친 데이터 뱉는 방식으로 가기
+    dataset = Pipeline_Dataset(config, x, y).get()
+    batch_transforms = [split_total_labels_to_sed_doa]
 
     dataset = dataset.batch(config.batch)
-    dataset = dataset.shuffle(x.shape[0] // config.batch)
+    for transforms in batch_transforms:
+        dataset = apply_ops(dataset, transforms)
         
     return dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -494,9 +556,9 @@ def main(config):
 
     # data load
     maskset = get_maskdata(config)
-    trainset = get_dataset(config, 'train')
-    valset = get_dataset(config, 'val')
-    testset = get_dataset(config, 'test')
+    # trainset = get_dataset(config, 'train')
+    # valset = get_dataset(config, 'val')
+    # testset = get_dataset(config, 'test')
 
     tensorboard_path = os.path.join('./tensorboard_log', config.name)
     if not os.path.exists(tensorboard_path):
@@ -509,18 +571,24 @@ def main(config):
         print(f'saved model directory: {model_path}')
         os.makedirs(model_path)
 
-    x, _ = [(x, y) for x, y in valset.take(1)][0]
+    x = [x for x, _, _, _ in maskset.take(1)][0]
     input_shape = x.shape[1:]
     model = get_model(input_shape)
+    setattr(model, 'train_config', config)
     kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
-    model = apply_kernel_regularizer(model, kernel_regularizer)
+    # model = apply_kernel_regularizer(model, kernel_regularizer)
 
     model.summary()
 
     optimizer = tf.keras.optimizers.Adam(config.lr)
     criterion = tf.keras.losses.MSE
-
-
+    callbacks = [ReduceLROnPlateau(monitor='val_loss', factor=1 / 2**0.5, patience=5, verbose=1, mode='min'),
+                 ModelCheckpoint("maskmodel.h5", monitor='val_loss', save_best_only=True, verbose=1),
+                 EarlyStopping(patience=config.patience, verbose=1, mode='min')]
+    model.compile(optimizer=optimizer, loss=criterion)
+    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=200, callbacks=callbacks,
+              validation_batch_size=config.batch * 4, validation_steps=20, validation_data=maskset, use_multiprocessing=True)
+    exit()
     if config.resume:
         _model_path = sorted(glob(model_path + '/*.hdf5'))
         if len(_model_path) == 0:
@@ -530,7 +598,7 @@ def main(config):
     best_score = inf
     evaluator = SELDMetrics(
         doa_threshold=config.lad_doa_thresh, n_classes=n_classes, sed_th=config.sed_th)
-
+    
     train_iterloop = generate_iterloop(
         criterion, evaluator, writer, 'train', config=config)
     val_iterloop = generate_iterloop(

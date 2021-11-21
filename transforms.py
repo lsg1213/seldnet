@@ -128,9 +128,11 @@ def sixteen_pattern_spatial_aug(x, y):
     return x, y
 
 
-def split_total_labels_to_sed_doa(x, y):
-    n_classes = tf.shape(y)[-1] // 4
-    return x, (y[..., :n_classes], y[..., n_classes:])
+def split_total_labels_to_sed_doa(x, y, sx=None, sy=None):
+    n_classes = y.shape[-1] // 4
+    if sx is None and sy is None:
+        return x, (y[..., :n_classes], y[..., n_classes:])
+    return x, (y[..., :n_classes], y[..., n_classes:]), sx, (sy[..., :n_classes], sy[..., n_classes:])
 
 
 def mic_gcc_perm(mic_perm):
