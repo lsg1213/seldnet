@@ -543,6 +543,19 @@ def get_dataset(config, mode: str = 'train'):
         
     return dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
+class_name = {
+    0 : 'alarm',
+    1 : 'crying baby',
+    2 : 'crash',
+    3 : 'barking dog',
+    4 : 'female scream',
+    5 : 'female speech',
+    6 : 'footsteps',
+    7 : 'knocking on door',
+    8 : 'male scream',
+    9 : 'male speech',
+    10 : 'ringing phone',
+    11 : 'piano'}
 
 class sample(tf.keras.callbacks.Callback):
     def __init__(self, config, dataset, path='sample'):
@@ -554,19 +567,23 @@ class sample(tf.keras.callbacks.Callback):
         self.path = path
         
     def on_epoch_end(self, epoch, logs=None):
-        if epoch >= 5 - 1:
-            for x, _, _, _ in self.dataset.take(1):
+        # if epoch >= 5 - 1:
+            for x, _, _, splited_y in self.dataset.take(1):
                 results = self.model(x, training=False)
-                masked_results = x[..., tf.newaxis] * results
-                masked_results = tf.reduce_sum(masked_results, axis=-1)
-                real_imag_idx = masked_results.shape[-1] // 2
-                masked_results = tf.complex(masked_results[...,:real_imag_idx], masked_results[...,real_imag_idx:])
-                wave_results = tf.signal.inverse_stft(tf.transpose(masked_results, [0,3,1,2]), 1024, 480, 1024)
-                wave_results = tf.transpose(wave_results, [0, 2, 1])
-                for i in range(wave_results.shape[0]):
-                    wave = wave_results[i]
-                    wave = tf.audio.encode_wav(wave, 24000)
-                    tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}.wav'), wave)
+                masked_results_all = x[..., tf.newaxis] * results
+                y = tf.argmax(splited_y[0], -1)
+                y = tf.reduce_max(y, -2)
+                masked_results = tf.gather(masked_results_all, y, axis=-1, batch_dims=1)
+                real_imag_idx = masked_results.shape[-2] // 2
+                masked_results = tf.complex(masked_results[...,:real_imag_idx,:], masked_results[...,real_imag_idx:,:])
+                for num in range(masked_results.shape[-1]):
+                    wave_results = tf.signal.inverse_stft(tf.transpose(masked_results[..., num], [0,3,1,2]), 1024, 480, 1024)
+                    wave_results = tf.transpose(wave_results, [0, 2, 1])
+                    for i in range(2):
+                        wave = wave_results[i]
+                        wave = tf.audio.encode_wav(wave, 24000)
+                        name = class_name[int(y[i][num])].replace(' ', '_')
+                        tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_{name}.wav'), wave)
 
 
 def main(config):
@@ -613,7 +630,7 @@ def main(config):
                  EarlyStopping(patience=config.patience, monitor='loss', verbose=1, mode='min', restore_best_weights=True),
                  sample(config, maskset,path='sample')]
     model.compile(optimizer=optimizer, loss=criterion)
-    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=200, callbacks=callbacks,
+    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=1, callbacks=callbacks,
               use_multiprocessing=True)
 
 
