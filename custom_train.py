@@ -630,7 +630,7 @@ def main(config):
                  EarlyStopping(patience=config.patience, monitor='loss', verbose=1, mode='min', restore_best_weights=True),
                  sample(config, maskset,path='sample')]
     model.compile(optimizer=optimizer, loss=criterion)
-    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=1, callbacks=callbacks,
+    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=400, callbacks=callbacks,
               use_multiprocessing=True)
 
 
