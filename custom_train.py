@@ -1,5 +1,5 @@
 '''
-이 파일은 custom loss를 실험하기 위해 제작된 파일로 third_train.py 기반으로 진행
+이 파일은 mask를 이용한 source seperation 모델을 제작하기 위해 만든 파일임
 '''
 
 import argparse
@@ -27,8 +27,8 @@ from utils import adaptive_clip_grad, apply_kernel_regularizer
     
 class ARGS:
     def __init__(self):
-        self.set('--name', type=str, default='')
-        self.set('--gpus', type=str, default='3')
+        self.set('--name', type=str, default='test')
+        self.set('--gpus', type=str, default='1')
         os.environ['CUDA_VISIBLE_DEVICES'] = self.gpus
         self.set('--resume', action='store_true')    
         self.set('--abspath', type=str, default='/root/datasets')
@@ -614,61 +614,7 @@ def main(config):
                  sample(config, maskset,path='sample')]
     model.compile(optimizer=optimizer, loss=criterion)
     model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=200, callbacks=callbacks,
-              use_multiprocessing=False)
-    exit()
-    if config.resume:
-        _model_path = sorted(glob(model_path + '/*.hdf5'))
-        if len(_model_path) == 0:
-            raise ValueError('the model does not exist, cannot be resumed')
-        model = tf.keras.models.load_model(_model_path[0])
-
-    best_score = inf
-    evaluator = SELDMetrics(
-        doa_threshold=config.lad_doa_thresh, n_classes=n_classes, sed_th=config.sed_th)
-    
-    train_iterloop = generate_iterloop(
-        criterion, evaluator, writer, 'train', config=config)
-    val_iterloop = generate_iterloop(
-        criterion, evaluator, writer, 'val', config=config)
-    test_iterloop = generate_iterloop(
-        criterion, evaluator, writer, 'test', config=config)
-
-    lr_decay_patience = 0
-    for epoch in range(config.epoch):
-
-        # train loop
-        train_iterloop(model, trainset, epoch, optimizer)
-        score = val_iterloop(model, valset, epoch)
-        test_iterloop(model, testset, epoch)
-
-        if best_score > score:
-            os.system(f'rm -rf {model_path}/bestscore_{best_score}.hdf5')
-            best_score = score
-            tf.keras.models.save_model(
-                model, 
-                os.path.join(model_path, f'bestscore_{best_score}.hdf5'), 
-                include_optimizer=False)
-            lr_decay_patience = 0
-        else:
-            if not config.schedule:
-                lr_decay_patience += 1
-                print(f'lr_decay_patience: {lr_decay_patience}')
-            if lr_decay_patience >= config.lr_patience and config.decay != 1:
-                print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * config.decay).numpy():.3}')
-                optimizer.learning_rate = optimizer.learning_rate * config.decay
-                lr_decay_patience = 0
-        if config.schedule:
-            # decay_coefficient = (config.final_lr / config.lr) ** (1 / config.epoch)
-            # print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate * decay_coefficient).numpy():.3}')
-            # optimizer.learning_rate = optimizer.learning_rate * decay_coefficient
-            decay_coefficient = (config.final_lr - config.lr) / config.epoch
-            print(f'lr: {optimizer.learning_rate.numpy():.3} -> {(optimizer.learning_rate + decay_coefficient).numpy():.3}')
-            optimizer.learning_rate = optimizer.learning_rate + decay_coefficient
-
-            
-
-    # end of training
-    print(f'epoch: {epoch}')
+              use_multiprocessing=True)
 
 
 if __name__=='__main__':
