@@ -41,9 +41,9 @@ class ARGS:
         self.set('--final_lr', type=float, default=0.0001)
         self.set('--batch', type=int, default=8)
         self.set('--agc', type=bool, default=False)
-        self.set('--epoch', type=int, default=100)
+        self.set('--epoch', type=int, default=200)
         self.set('--lr_patience', type=int, default=5, help='learning rate decay patience for plateau')
-        self.set('--patience', type=int, default=100, help='early stop patience')
+        self.set('--patience', type=int, default=10, help='early stop patience')
         self.set('--use_acs', type=bool, default=True)
         self.set('--use_tfm', type=bool, default=True)
         self.set('--use_tdm', action='store_true')
@@ -544,14 +544,39 @@ def get_dataset(config, mode: str = 'train'):
     return dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
 
+class sample(tf.keras.callbacks.Callback):
+    def __init__(self, config, dataset, path='sample'):
+        super(sample, self).__init__()
+        if not os.path.exists(os.path.join(config.name, 'sample')):
+            os.makedirs(os.path.join(config.name, 'sample'))
+        self.config = config
+        self.dataset = dataset
+        self.path = path
+        
+    def on_epoch_end(self, epoch, logs=None):
+        if epoch >= 5 - 1:
+            for x, _, _, _ in self.dataset.take(1):
+                results = self.model(x, training=False)
+                masked_results = x[..., tf.newaxis] * results
+                masked_results = tf.reduce_sum(masked_results, axis=-1)
+                real_imag_idx = masked_results.shape[-1] // 2
+                masked_results = tf.complex(masked_results[...,:real_imag_idx], masked_results[...,real_imag_idx:])
+                wave_results = tf.signal.inverse_stft(tf.transpose(masked_results, [0,3,1,2]), 1024, 480, 1024)
+                wave_results = tf.transpose(wave_results, [0, 2, 1])
+                for i in range(wave_results.shape[0]):
+                    wave = wave_results[i]
+                    wave = tf.audio.encode_wav(wave, 24000)
+                    tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}.wav'), wave)
+
+
 def main(config):
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     n_classes = 12
-    name = '_'.join(['2', str(config.lr), str(config.final_lr)])
+    name = '_'.join(['maskmodel', str(config.lr), str(config.final_lr)])
     if config.schedule:
         name += '_schedule'
-    if config.norm:
-        name += '_norm'
+    # if config.norm:
+    #     name += '_norm'
     config.name = name + '_' + config.name
 
     # data load
@@ -579,15 +604,17 @@ def main(config):
     # model = apply_kernel_regularizer(model, kernel_regularizer)
 
     model.summary()
-
+    if not os.path.exists(os.path.join('saved_model', config.name)):
+        os.makedirs(os.path.join('saved_model', config.name))
     optimizer = tf.keras.optimizers.Adam(config.lr)
     criterion = tf.keras.losses.MSE
-    callbacks = [ReduceLROnPlateau(monitor='val_loss', factor=1 / 2**0.5, patience=5, verbose=1, mode='min'),
-                 ModelCheckpoint("maskmodel.h5", monitor='val_loss', save_best_only=True, verbose=1),
-                 EarlyStopping(patience=config.patience, verbose=1, mode='min')]
+    callbacks = [ReduceLROnPlateau(monitor='loss', factor=1 / 2**0.5, patience=3, verbose=1, mode='min'),
+                 ModelCheckpoint(os.path.join('saved_model', config.name, "maskmodel.h5"), monitor='loss', save_best_only=True, verbose=1),
+                 EarlyStopping(patience=config.patience, monitor='loss', verbose=1, mode='min', restore_best_weights=True),
+                 sample(config, maskset,path='sample')]
     model.compile(optimizer=optimizer, loss=criterion)
     model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=200, callbacks=callbacks,
-              validation_batch_size=config.batch * 4, validation_steps=20, validation_data=maskset, use_multiprocessing=True)
+              use_multiprocessing=False)
     exit()
     if config.resume:
         _model_path = sorted(glob(model_path + '/*.hdf5'))
