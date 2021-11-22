@@ -483,9 +483,9 @@ class Pipeline_Dataset:
             x3 *= tf.repeat(mask3[..., tf.newaxis], self.resolution, axis=0)[:x3.shape[0]]
             
             snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
-            x = x1 + tf.concat([10 ** (snr / 20) * x2[..., :x2.shape[-1] // 2], x2[..., x2.shape[-1] // 2:]], -1)
+            x = x1 + 10 ** (snr / 20) * x2
             snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
-            x += tf.concat([10 ** (snr / 20) * x3[..., :x3.shape[-1] // 2], x3[..., x3.shape[-1] // 2:]], -1)
+            x += 10 ** (snr / 20) * x3
             y = y1 + y2 + y3
             yield x, y, tf.stack([x1, x2, x3], -1), tf.stack([y1, y2, y3], -2)
 
@@ -561,8 +561,8 @@ class_name = {
 class sample(tf.keras.callbacks.Callback):
     def __init__(self, config, dataset, path='sample'):
         super(sample, self).__init__()
-        if not os.path.exists(os.path.join(config.name, 'sample')):
-            os.makedirs(os.path.join(config.name, 'sample'))
+        if not os.path.exists(os.path.join('sample', config.name)):
+            os.makedirs(os.path.join('sample', config.name))
         self.config = config
         self.dataset = dataset
         self.path = path
