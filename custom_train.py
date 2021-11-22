@@ -567,7 +567,7 @@ class sample(tf.keras.callbacks.Callback):
         self.path = path
         
     def on_epoch_end(self, epoch, logs=None):
-        if epoch >= 5 - 1:
+        # if epoch >= 5 - 1:
             for x, _, splited_x, splited_y in self.dataset.take(1):
                 results = self.model(x, training=False)
                 masked_results_all = x[..., tf.newaxis] * results
@@ -576,10 +576,12 @@ class sample(tf.keras.callbacks.Callback):
                 masked_results = tf.gather(masked_results_all, y, axis=-1, batch_dims=1)
                 real_imag_idx = masked_results.shape[-2] // 2
                 masked_results = tf.complex(masked_results[...,:real_imag_idx,:], masked_results[...,real_imag_idx:,:])
+
+                splited = tf.complex(splited_x[...,:real_imag_idx,:], splited_x[...,real_imag_idx:,:])
                 for num in range(masked_results.shape[-1]):
                     wave_results = tf.signal.inverse_stft(tf.transpose(masked_results[..., num], [0,3,1,2]), 1024, 480, 1024)
                     wave_results = tf.transpose(wave_results, [0, 2, 1])
-                    raw_results = tf.signal.inverse_stft(tf.transpose(splited_x[..., num], [0,3,1,2]), 1024, 480, 1024)
+                    raw_results = tf.signal.inverse_stft(tf.transpose(splited[..., num], [0,3,1,2]), 1024, 480, 1024)
                     raw_results = tf.transpose(raw_results, [0, 2, 1])
                     for i in range(2):
                         wave = wave_results[i]
@@ -588,7 +590,6 @@ class sample(tf.keras.callbacks.Callback):
                         tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_{name}.wav'), wave)
                         
                         wave = tf.audio.encode_wav(raw_results[i], 24000)
-                        wave = tf.audio.encode_wav(wave, 24000)
                         name = class_name[int(y[i][num])].replace(' ', '_')
                         tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_{name}_raw.wav'), wave)
 
@@ -637,7 +638,7 @@ def main(config):
                  EarlyStopping(patience=config.patience, monitor='loss', verbose=1, mode='min', restore_best_weights=True),
                  sample(config, maskset,path='sample')]
     model.compile(optimizer=optimizer, loss=criterion)
-    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=400, callbacks=callbacks,
+    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=1, callbacks=callbacks,
               use_multiprocessing=True)
 
 
