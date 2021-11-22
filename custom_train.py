@@ -27,8 +27,8 @@ from utils import adaptive_clip_grad, apply_kernel_regularizer
     
 class ARGS:
     def __init__(self):
-        self.set('--name', type=str, default='test')
-        self.set('--gpus', type=str, default='2')
+        self.set('--name', type=str, default='stft')
+        self.set('--gpus', type=str, default='3')
         os.environ['CUDA_VISIBLE_DEVICES'] = self.gpus
         self.set('--resume', action='store_true')    
         self.set('--abspath', type=str, default='/root/datasets')
@@ -63,6 +63,44 @@ class ARGS:
         setattr(self, name, type(default))
         
 args = ARGS()
+
+
+""" COMPLEX-SPECTROGRAMS """
+def complex_to_magphase(complex_tensor, y=None):
+    if tf.rank(complex_tensor) == 4:
+        n_chan = complex_tensor.shape[-1] // 2
+        real = complex_tensor[..., :n_chan]
+        img = complex_tensor[..., n_chan:]
+    elif tf.rank(complex_tensor) == 5:
+        n_chan = complex_tensor.shape[-2] // 2
+        real = complex_tensor[..., :n_chan, :]
+        img = complex_tensor[..., n_chan:, :]
+
+    mag = tf.math.sqrt(real**2 + img**2)
+    phase = tf.math.atan2(img, real)
+
+    magphase = tf.concat([mag, phase], axis=-1)
+
+    if y is None:
+        return magphase
+    return magphase, y
+
+
+def magphase_to_complex(magphase):
+    if tf.rank(magphase) == 4:
+        n_chan = magphase.shape[-1] // 2
+        mag = magphase[..., :n_chan]
+        phase = magphase[..., n_chan:]
+    elif tf.rank(magphase) == 5:
+        n_chan = magphase.shape[-2] // 2
+        mag = magphase[..., :n_chan, :]
+        phase = magphase[..., n_chan:, :]
+
+    real = mag * tf.cos(phase)
+    img = mag * tf.sin(phase)
+
+    return tf.concat([real, img], axis=-1)
+
 
 def resnet_block(inp, planes, stride=1, downsample=None, groups=1,
                  base_width=64, dilation=1, norm_layer=None):
@@ -282,6 +320,8 @@ class CustomModel(tf.keras.Model):
         # Unpack the data. Its structure depends on your model and
         # on what you pass to `fit()`.
         x, y, splited_x, splited_y = data
+        if 'mag' in self.name:
+            x = complex_to_magphase(x)
         # splited_y = (batch, time, one_hot class, 3)
 
         resolution = x.shape[1] // y[0].shape[1]
@@ -293,6 +333,8 @@ class CustomModel(tf.keras.Model):
             for i in range(splited_x.shape[-1]):
                 sy, sx = splited_y[0][...,i,:], splited_x[...,i]
                 results += sx[..., tf.newaxis] * tf.repeat(sy, resolution, axis=1)[..., tf.newaxis, tf.newaxis, :]
+            if 'mag' in self.name:
+                masked_x = magphase_to_complex(masked_x)
             loss = self.compiled_loss(masked_x, results)
 
         # Compute gradients
