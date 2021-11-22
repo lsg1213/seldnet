@@ -483,9 +483,9 @@ class Pipeline_Dataset:
             x3 *= tf.repeat(mask3[..., tf.newaxis], self.resolution, axis=0)[:x3.shape[0]]
             
             snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
-            x = x1 + 10 ** (snr / 20) * x2
+            x = x1 + tf.concat([10 ** (snr / 20) * x2[..., :x2.shape[-1] // 2], x2[..., x2.shape[-1] // 2:]], -1)
             snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
-            x += 10 ** (snr / 20) * x3
+            x += tf.concat([10 ** (snr / 20) * x3[..., :x3.shape[-1] // 2], x3[..., x3.shape[-1] // 2:]], -1)
             y = y1 + y2 + y3
             yield x, y, tf.stack([x1, x2, x3], -1), tf.stack([y1, y2, y3], -2)
 
