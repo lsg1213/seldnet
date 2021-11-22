@@ -53,6 +53,7 @@ class ARGS:
         self.set('--nfft', type=int, default=1024)
         self.set('--hop', type=int, default=480)
         self.set('--len', type=int, default=4)
+        self.set('--steps_per_epoch', type=int, default=400)
         
     def set(self, name, type=str, default=None, action=None, help=''):
         if action == 'store_true':
@@ -567,7 +568,7 @@ class sample(tf.keras.callbacks.Callback):
         self.path = path
         
     def on_epoch_end(self, epoch, logs=None):
-        # if epoch >= 5 - 1:
+        if epoch >= 5 - 1:
             for x, _, splited_x, splited_y in self.dataset.take(1):
                 results = self.model(x, training=False)
                 masked_results_all = x[..., tf.newaxis] * results
@@ -638,7 +639,7 @@ def main(config):
                  EarlyStopping(patience=config.patience, monitor='loss', verbose=1, mode='min', restore_best_weights=True),
                  sample(config, maskset,path='sample')]
     model.compile(optimizer=optimizer, loss=criterion)
-    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=1, callbacks=callbacks,
+    model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=config.steps_per_epoch, callbacks=callbacks,
               use_multiprocessing=True)
 
 
