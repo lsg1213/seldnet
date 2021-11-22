@@ -28,7 +28,7 @@ from utils import adaptive_clip_grad, apply_kernel_regularizer
 class ARGS:
     def __init__(self):
         self.set('--name', type=str, default='test')
-        self.set('--gpus', type=str, default='1')
+        self.set('--gpus', type=str, default='2')
         os.environ['CUDA_VISIBLE_DEVICES'] = self.gpus
         self.set('--resume', action='store_true')    
         self.set('--abspath', type=str, default='/root/datasets')
@@ -37,7 +37,7 @@ class ARGS:
         self.set('--norm', type=bool, default=True)
         self.set('--decay', type=float, default=0.9)
         self.set('--sed_th', type=float, default=0.3)
-        self.set('--lr', type=float, default=0.001)
+        self.set('--lr', type=float, default=4e-5)
         self.set('--final_lr', type=float, default=0.0001)
         self.set('--batch', type=int, default=8)
         self.set('--agc', type=bool, default=False)
@@ -483,9 +483,14 @@ class Pipeline_Dataset:
             x3 *= tf.repeat(mask3[..., tf.newaxis], self.resolution, axis=0)[:x3.shape[0]]
             
             snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
-            x = x1 + 10 ** (snr / 20) * x2
-            snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
-            x += 10 ** (snr / 20) * x3
+            x1 = 10 ** (snr / 20) * x1
+            x = x1
+            snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x2.dtype)
+            x2 = 10 ** (snr / 20) * x2
+            x += x2
+            snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x3.dtype)
+            x3 = 10 ** (snr / 20) * x3
+            x += x3
             y = y1 + y2 + y3
             yield x, y, tf.stack([x1, x2, x3], -1), tf.stack([y1, y2, y3], -2)
 
@@ -544,6 +549,7 @@ def get_dataset(config, mode: str = 'train'):
         
     return dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
+
 class_name = {
     0 : 'alarm',
     1 : 'crying baby',
@@ -557,6 +563,7 @@ class_name = {
     9 : 'male speech',
     10 : 'ringing phone',
     11 : 'piano'}
+
 
 class sample(tf.keras.callbacks.Callback):
     def __init__(self, config, dataset, path='sample'):
@@ -579,20 +586,23 @@ class sample(tf.keras.callbacks.Callback):
                 masked_results = tf.complex(masked_results[...,:real_imag_idx,:], masked_results[...,real_imag_idx:,:])
 
                 splited = tf.complex(splited_x[...,:real_imag_idx,:], splited_x[...,real_imag_idx:,:])
-                for num in range(masked_results.shape[-1]):
-                    wave_results = tf.signal.inverse_stft(tf.transpose(masked_results[..., num], [0,3,1,2]), 1024, 480, 1024)
-                    wave_results = tf.transpose(wave_results, [0, 2, 1])
-                    raw_results = tf.signal.inverse_stft(tf.transpose(splited[..., num], [0,3,1,2]), 1024, 480, 1024)
-                    raw_results = tf.transpose(raw_results, [0, 2, 1])
-                    for i in range(2):
-                        wave = wave_results[i]
+                for i in range(2):
+                    wave_results = tf.signal.inverse_stft(tf.transpose(masked_results[i], [2,3,0,1]), 1024, 480, 1024)
+                    wave_results = tf.transpose(wave_results, [2, 0, 1])
+                    raw_results = tf.signal.inverse_stft(tf.transpose(splited[i], [2,3,0,1]), 1024, 480, 1024)
+                    raw_results = tf.transpose(raw_results, [2, 0, 1])
+                    for num in range(masked_results.shape[-1]):
+                        wave = wave_results[..., num]
                         wave = tf.audio.encode_wav(wave, 24000)
                         name = class_name[int(y[i][num])].replace(' ', '_')
                         tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_{name}.wav'), wave)
                         
                         wave = tf.audio.encode_wav(raw_results[i], 24000)
-                        name = class_name[int(y[i][num])].replace(' ', '_')
                         tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_{name}_raw.wav'), wave)
+                    raw_results = tf.reduce_sum(raw_results, -1)
+                    wave = tf.audio.encode_wav(raw_results, 24000)
+                    tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_all.wav'), wave)
+
 
 
 def main(config):
