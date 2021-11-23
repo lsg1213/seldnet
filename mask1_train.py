@@ -27,9 +27,9 @@ from utils import adaptive_clip_grad, apply_kernel_regularizer
     
 class ARGS:
     def __init__(self):
+        self.args = argparse.ArgumentParser()
         self.set('--name', type=str, default='stft')
         self.set('--gpus', type=str, default='1')
-        os.environ['CUDA_VISIBLE_DEVICES'] = self.gpus
         self.set('--resume', action='store_true')    
         self.set('--abspath', type=str, default='/root/datasets')
         self.set('--output_path', type=str, default='./output')
@@ -56,13 +56,21 @@ class ARGS:
         self.set('--steps_per_epoch', type=int, default=400)
         
     def set(self, name, type=str, default=None, action=None, help=''):
-        if action == 'store_true':
-            type = bool
-            default = False
-        name = name.split('--')[-1]
-        setattr(self, name, type(default))
+        # if action == 'store_true':
+        #     type = bool
+        #     default = False
+        # name = name.split('--')[-1]
+        # setattr(self, name, type(default))
+        if action is not None:
+            self.args.add_argument(name, action=action, help=help)
+        else:
+            self.args.add_argument(name, type=type, default=default, help=help)
+
+    def get(self):
+        return self.args.parse_args()
         
-args = ARGS()
+args = ARGS().get()
+os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
 
 
 """ COMPLEX-SPECTROGRAMS """
@@ -470,71 +478,34 @@ class Pipeline_Dataset:
 
     def gen(self):
         while True:
-            x1_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
-            x2_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
-            x3_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
-            while x1_class == x2_class:
-                x2_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
-            while x1_class == x3_class or x2_class == x3_class:
-                x3_class = tf.random.uniform((), minval=0, maxval=self.class_num, dtype=tf.int32)
+            class_list = []
+            res_x = np.zeros([self.frame_num] + [*self.x_0.shape[1:]] + [0], dtype=self.x_0.dtype)
+            res_y = np.zeros([self.label_len] + [*self.y_0.shape[1:]] + [0], dtype=self.y_0.dtype)
+            for i in range(int(tf.random.uniform((), minval=1, maxval=3 + 1))):
+                x_class = np.random.randint(self.class_num)
+                while x_class in class_list:
+                    x_class = np.random.randint(self.class_num)
+                x = getattr(self, f'x_{x_class}')
+                y = getattr(self, f'y_{x_class}')
+                x_offset = np.random.randint(x.shape[0] - self.frame_num)
+                x = x[x_offset:x_offset+self.frame_num]
+                y = y[x_offset // self.resolution: x_offset // self.resolution + self.label_len]
 
-            x1 = getattr(self, f'x_{x1_class}')
-            x2 = getattr(self, f'x_{x2_class}')
-            x3 = getattr(self, f'x_{x3_class}')
-            y1 = getattr(self, f'y_{x1_class}')
-            y2 = getattr(self, f'y_{x2_class}')
-            y3 = getattr(self, f'y_{x3_class}')
-            x1_offset = tf.random.uniform((), minval=0, maxval=x1.shape[0] - self.frame_num, dtype=tf.int32)
-            x2_offset = tf.random.uniform((), minval=0, maxval=x2.shape[0] - self.frame_num, dtype=tf.int32)
-            x3_offset = tf.random.uniform((), minval=0, maxval=x3.shape[0] - self.frame_num, dtype=tf.int32)
-            x1 = x1[x1_offset:x1_offset+self.frame_num]
-            x2 = x2[x2_offset:x2_offset+self.frame_num]
-            x3 = x3[x3_offset:x3_offset+self.frame_num]
-            y1 = y1[x1_offset // self.resolution: x1_offset // self.resolution + self.label_len]
-            y2 = y2[x2_offset // self.resolution: x2_offset // self.resolution + self.label_len]
-            y3 = y3[x3_offset // self.resolution: x3_offset // self.resolution + self.label_len]
-
-            mask1_offset = tf.random.uniform((), minval=0, maxval=y1.shape[0] // 2, dtype=tf.int32)
-            mask1_len = tf.random.uniform((), minval=y1.shape[0] // 2, maxval=y1.shape[0] - mask1_offset, dtype=tf.int32)
-            mask1 = tf.concat([
-                tf.zeros([mask1_offset, 1], dtype=y1.dtype),
-                tf.ones([mask1_len, 1], dtype=y1.dtype),
-                tf.zeros([y1.shape[0] - mask1_offset - mask1_len, 1], dtype=y1.dtype)
-            ], 0)
-            y1 *= mask1
-            x1 *= tf.repeat(mask1[..., tf.newaxis], self.resolution, axis=0)[:x1.shape[0]]
-
-            mask2_offset = tf.random.uniform((), minval=0, maxval=y2.shape[0] // 2, dtype=tf.int32)
-            mask2_len = tf.random.uniform((), minval=y2.shape[0] // 2, maxval=y2.shape[0] - mask2_offset, dtype=tf.int32)
-            mask2 = tf.concat([
-                tf.zeros([mask2_offset, 1], dtype=y2.dtype),
-                tf.ones([mask2_len, 1], dtype=y2.dtype),
-                tf.zeros([y2.shape[0] - mask2_offset - mask2_len, 1], dtype=y2.dtype)
-            ], 0)
-            y2 *= mask2
-            x2 *= tf.repeat(mask2[..., tf.newaxis], self.resolution, axis=0)[:x2.shape[0]]
-
-            mask3_offset = tf.random.uniform((), minval=0, maxval=y3.shape[0] // 2, dtype=tf.int32)
-            mask3_len = tf.random.uniform((), minval=y3.shape[0] // 2, maxval=y3.shape[0] - mask3_offset, dtype=tf.int32)
-            mask3 = tf.concat([
-                tf.zeros([mask3_offset, 1], dtype=y3.dtype),
-                tf.ones([mask3_len, 1], dtype=y3.dtype),
-                tf.zeros([y3.shape[0] - mask3_offset - mask3_len, 1], dtype=y3.dtype)
-            ], 0)
-            y3 *= mask3
-            x3 *= tf.repeat(mask3[..., tf.newaxis], self.resolution, axis=0)[:x3.shape[0]]
-            
-            snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x1.dtype)
-            x1 = 10 ** (snr / 20) * x1
-            x = x1
-            snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x2.dtype)
-            x2 = 10 ** (snr / 20) * x2
-            x += x2
-            snr = tf.random.uniform((), minval=self.snr, maxval=0, dtype=x3.dtype)
-            x3 = 10 ** (snr / 20) * x3
-            x += x3
-            y = y1 + y2 + y3
-            yield x, y, tf.stack([x1, x2, x3], -1), tf.stack([y1, y2, y3], -2)
+                mask_offset = np.random.randint(y.shape[0] // 2)
+                mask_len = np.random.randint(y.shape[0] // 2, y.shape[0] - mask_offset)
+                mask = np.concatenate([
+                    np.zeros([mask_offset, 1], dtype=y.dtype),
+                    np.ones([mask_len, 1], dtype=y.dtype),
+                    np.zeros([y.shape[0] - mask_offset - mask_len, 1], dtype=y.dtype)
+                ], 0)
+                y *= mask
+                x *= np.repeat(mask[..., np.newaxis], self.resolution, axis=0)[:x.shape[0]]
+                np.random.rand(())
+                snr = np.random.rand() * self.snr
+                x = 10 ** (snr / 20) * x
+                res_x = np.concatenate([res_x, x[..., np.newaxis]], -1)
+                res_y = np.concatenate([res_y, y[..., np.newaxis]], -1)
+            yield res_x.sum(-1), res_y.sum(-1), res_x, np.moveaxis(res_y, -2, -1)
 
     def get(self):
         return tf.data.Dataset.from_generator(self.gen,
