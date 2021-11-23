@@ -512,8 +512,8 @@ class Pipeline_Dataset:
             (tf.float32, tf.float32, tf.float32, tf.float32), 
             (tf.TensorShape([self.frame_num, self.freq_num, self.chan]), 
              tf.TensorShape([self.label_len, self.class_num * 4]), 
-             tf.TensorShape([self.frame_num, self.freq_num, self.chan, 3]),
-             tf.TensorShape([self.label_len, 3, self.class_num * 4]))
+             tf.TensorShape([self.frame_num, self.freq_num, self.chan, None]),
+             tf.TensorShape([self.label_len, None, self.class_num * 4]))
         ).prefetch(AUTOTUNE)
 
 
@@ -588,10 +588,11 @@ class sample(tf.keras.callbacks.Callback):
         self.path = path
         
     def on_epoch_end(self, epoch, logs=None):
-        if epoch >= 10 - 1:
+        # if epoch >= 10 - 1:
             for x, _, splited_x, splited_y in self.dataset.take(1):
                 results = self.model(x, training=False)
                 masked_results_all = x[..., tf.newaxis] * results
+                import pdb; pdb.set_trace()
                 y = tf.argmax(splited_y[0], -1)
                 y = tf.reduce_max(y, -2)
                 masked_results = tf.gather(masked_results_all, y, axis=-1, batch_dims=1)
