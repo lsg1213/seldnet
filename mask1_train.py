@@ -479,9 +479,10 @@ class Pipeline_Dataset:
     def gen(self):
         while True:
             class_list = []
-            res_x = np.zeros([self.frame_num] + [*self.x_0.shape[1:]] + [0], dtype=self.x_0.dtype)
-            res_y = np.zeros([self.label_len] + [*self.y_0.shape[1:]] + [0], dtype=self.y_0.dtype)
-            for i in range(int(tf.random.uniform((), minval=1, maxval=3 + 1))):
+            res_x = np.zeros([self.frame_num] + [*self.x_0.shape[1:]] + [3], dtype=self.x_0.dtype)
+            res_y = np.zeros([self.label_len] + [*self.y_0.shape[1:]] + [3], dtype=self.y_0.dtype)
+            sample_num = int(tf.random.uniform((), minval=1, maxval=3 + 1))
+            for i in range(sample_num):
                 x_class = np.random.randint(self.class_num)
                 while x_class in class_list:
                     x_class = np.random.randint(self.class_num)
@@ -500,20 +501,19 @@ class Pipeline_Dataset:
                 ], 0)
                 y *= mask
                 x *= np.repeat(mask[..., np.newaxis], self.resolution, axis=0)[:x.shape[0]]
-                np.random.rand(())
                 snr = np.random.rand() * self.snr
                 x = 10 ** (snr / 20) * x
-                res_x = np.concatenate([res_x, x[..., np.newaxis]], -1)
-                res_y = np.concatenate([res_y, y[..., np.newaxis]], -1)
-            yield res_x.sum(-1), res_y.sum(-1), res_x, np.moveaxis(res_y, -2, -1)
+                res_x[..., i] = x
+                res_y[..., i] = y
+            yield res_x.sum(-1), res_y.sum(-1), res_x, np.swapaxes(res_y, -2, -1)
 
     def get(self):
         return tf.data.Dataset.from_generator(self.gen,
             (tf.float32, tf.float32, tf.float32, tf.float32), 
             (tf.TensorShape([self.frame_num, self.freq_num, self.chan]), 
              tf.TensorShape([self.label_len, self.class_num * 4]), 
-             tf.TensorShape([self.frame_num, self.freq_num, self.chan, None]),
-             tf.TensorShape([self.label_len, None, self.class_num * 4]))
+             tf.TensorShape([self.frame_num, self.freq_num, self.chan, 3]),
+             tf.TensorShape([self.label_len, 3, self.class_num * 4]))
         ).prefetch(AUTOTUNE)
 
 
@@ -592,7 +592,6 @@ class sample(tf.keras.callbacks.Callback):
             for x, _, splited_x, splited_y in self.dataset.take(1):
                 results = self.model(x, training=False)
                 masked_results_all = x[..., tf.newaxis] * results
-                import pdb; pdb.set_trace()
                 y = tf.argmax(splited_y[0], -1)
                 y = tf.reduce_max(y, -2)
                 masked_results = tf.gather(masked_results_all, y, axis=-1, batch_dims=1)
@@ -606,6 +605,8 @@ class sample(tf.keras.callbacks.Callback):
                     raw_results = tf.signal.inverse_stft(tf.transpose(splited[i], [2,3,0,1]), 1024, 480, 1024)
                     raw_results = tf.transpose(raw_results, [2, 0, 1])
                     for num in range(masked_results.shape[-1]):
+                        if tf.reduce_sum(splited_y[0], (-3,-1))[i,num] == 0:
+                            continue
                         wave = wave_results[..., num]
                         wave = tf.audio.encode_wav(wave, 24000)
                         name = class_name[int(y[i][num])].replace(' ', '_')
@@ -616,7 +617,6 @@ class sample(tf.keras.callbacks.Callback):
                     raw_results = tf.reduce_sum(raw_results, -1)
                     wave = tf.audio.encode_wav(raw_results, 24000)
                     tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_all.wav'), wave)
-
 
 
 def main(config):
