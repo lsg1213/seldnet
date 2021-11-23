@@ -490,8 +490,8 @@ class Pipeline_Dataset:
                 x = getattr(self, f'x_{x_class}')
                 y = getattr(self, f'y_{x_class}')
                 x_offset = np.random.randint(x.shape[0] - self.frame_num)
-                x = x[x_offset:x_offset+self.frame_num]
-                y = y[x_offset // self.resolution: x_offset // self.resolution + self.label_len]
+                x = np.copy(x[x_offset:x_offset+self.frame_num])
+                y = np.copy(y[x_offset // self.resolution: x_offset // self.resolution + self.label_len])
 
                 mask_offset = np.random.randint(y.shape[0] // 2)
                 mask_len = np.random.randint(y.shape[0] // 2, y.shape[0] - mask_offset)
