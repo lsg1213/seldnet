@@ -28,7 +28,7 @@ from utils import adaptive_clip_grad, apply_kernel_regularizer
 class ARGS:
     def __init__(self):
         self.set('--name', type=str, default='stft')
-        self.set('--gpus', type=str, default='3')
+        self.set('--gpus', type=str, default='1')
         os.environ['CUDA_VISIBLE_DEVICES'] = self.gpus
         self.set('--resume', action='store_true')    
         self.set('--abspath', type=str, default='/root/datasets')
@@ -37,8 +37,8 @@ class ARGS:
         self.set('--norm', type=bool, default=True)
         self.set('--decay', type=float, default=0.9)
         self.set('--sed_th', type=float, default=0.3)
-        self.set('--lr', type=float, default=4e-5)
-        self.set('--final_lr', type=float, default=0.0001)
+        self.set('--lr', type=float, default=1e-3)
+        self.set('--final_lr', type=float, default=0.00001)
         self.set('--batch', type=int, default=8)
         self.set('--agc', type=bool, default=False)
         self.set('--epoch', type=int, default=200)
@@ -617,7 +617,7 @@ class sample(tf.keras.callbacks.Callback):
         self.path = path
         
     def on_epoch_end(self, epoch, logs=None):
-        if epoch >= 5 - 1:
+        if epoch >= 10 - 1:
             for x, _, splited_x, splited_y in self.dataset.take(1):
                 results = self.model(x, training=False)
                 masked_results_all = x[..., tf.newaxis] * results
@@ -638,8 +638,8 @@ class sample(tf.keras.callbacks.Callback):
                         wave = tf.audio.encode_wav(wave, 24000)
                         name = class_name[int(y[i][num])].replace(' ', '_')
                         tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_{name}.wav'), wave)
-                        
-                        wave = tf.audio.encode_wav(raw_results[i], 24000)
+
+                        wave = tf.audio.encode_wav(raw_results[..., num], 24000)
                         tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_{name}_raw.wav'), wave)
                     raw_results = tf.reduce_sum(raw_results, -1)
                     wave = tf.audio.encode_wav(raw_results, 24000)
