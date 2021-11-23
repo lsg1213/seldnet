@@ -12,6 +12,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import *
 from tensorflow.keras.callbacks import *
+from tensorflow.keras.losses import MSE
 import tensorflow_addons as tfa
 from glob import glob
 from numpy import inf
@@ -343,7 +344,7 @@ class CustomModel(tf.keras.Model):
                 results += sx[..., tf.newaxis] * tf.repeat(sy, resolution, axis=1)[..., tf.newaxis, tf.newaxis, :]
             if 'mag' in self.name:
                 masked_x = magphase_to_complex(masked_x)
-            loss = self.compiled_loss(masked_x, results)
+            loss = self.compiled_loss(results, masked_x)
 
         # Compute gradients
         trainable_vars = self.trainable_variables
@@ -354,7 +355,7 @@ class CustomModel(tf.keras.Model):
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         # Update metrics (includes the metric that tracks the loss)
         
-        self.compiled_metrics.update_state(x, y_pred)
+        self.compiled_metrics.update_state(results, masked_x)
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
@@ -588,7 +589,7 @@ class sample(tf.keras.callbacks.Callback):
         self.path = path
         
     def on_epoch_end(self, epoch, logs=None):
-        # if epoch >= 10 - 1:
+        if epoch >= 10 - 1:
             for x, _, splited_x, splited_y in self.dataset.take(1):
                 results = self.model(x, training=False)
                 masked_results_all = x[..., tf.newaxis] * results
@@ -617,6 +618,15 @@ class sample(tf.keras.callbacks.Callback):
                     raw_results = tf.reduce_sum(raw_results, -1)
                     wave = tf.audio.encode_wav(raw_results, 24000)
                     tf.io.write_file(os.path.join(self.path, self.config.name, f'{epoch + 1}_{i}_all.wav'), wave)
+
+
+def _mse_100000times(y_true, y_pred):
+    return MSE(y_true, y_pred) * 100000
+
+
+def mse_100000times(y_true, y_pred):
+    score = tf.py_function(func=_mse_100000times, inp=[y_true, y_pred], Tout=tf.float32,  name='mse_100000times') # tf 2.x
+    return score
 
 
 def main(config):
@@ -658,11 +668,11 @@ def main(config):
         os.makedirs(os.path.join('saved_model', config.name))
     optimizer = tf.keras.optimizers.Adam(config.lr)
     criterion = tf.keras.losses.MSE
-    callbacks = [ReduceLROnPlateau(monitor='loss', factor=1 / 2**0.5, patience=3, verbose=1, mode='min'),
-                 ModelCheckpoint(os.path.join('saved_model', config.name, "maskmodel.h5"), monitor='loss', save_best_only=True, verbose=1),
-                 EarlyStopping(patience=config.patience, monitor='loss', verbose=1, mode='min', restore_best_weights=True),
+    callbacks = [ReduceLROnPlateau(monitor='mse_100000times', factor=1 / 2**0.5, patience=3, verbose=1, mode='min'),
+                 ModelCheckpoint(os.path.join('saved_model', config.name, "maskmodel.h5"), monitor='mse_100000times', save_best_only=True, verbose=1),
+                 EarlyStopping(patience=config.patience, monitor='mse_100000times', verbose=1, mode='min', restore_best_weights=True),
                  sample(config, maskset,path='sample')]
-    model.compile(optimizer=optimizer, loss=criterion)
+    model.compile(optimizer=optimizer, loss=criterion, metrics=[mse_100000times])
     model.fit(maskset, epochs=config.epoch, batch_size=config.batch, steps_per_epoch=config.steps_per_epoch, callbacks=callbacks,
               use_multiprocessing=True)
 
