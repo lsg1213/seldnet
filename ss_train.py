@@ -5,6 +5,7 @@ from collections import OrderedDict
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.framework.tensor_shape import TensorShape
 import tensorflow.python.keras.api.keras as keras
 import tensorflow_addons as tfa
 from glob import glob
@@ -16,6 +17,10 @@ from data_loader import *
 from metrics import SELDMetrics, calculate_seld_score
 from transforms import *
 from utils import adaptive_clip_grad, apply_kernel_regularizer
+
+
+distributed_strategy = None
+
 
 args = argparse.ArgumentParser()
     
@@ -36,6 +41,8 @@ args.add_argument('--mel', type=int, default=128)
 
 # training
 args.add_argument('--masktrain', action='store_true')
+args.add_argument('--pretrain', action='store_true')
+args.add_argument('--pt', type=str, default='')
 args.add_argument('--decay', type=float, default=0.9)
 args.add_argument('--sed_th', type=float, default=0.3)
 args.add_argument('--lr', type=float, default=0.001)
@@ -198,6 +205,7 @@ def stft_to_mel_intensity_vector(config):
 
 
 def generate_trainstep(criterion, config):
+    global distributed_strategy
     # These are statistics from the train dataset
     # train_samples = tf.convert_to_tensor(
     #     [[58193, 32794, 29801, 21478, 14822, 
@@ -206,7 +214,6 @@ def generate_trainstep(criterion, config):
     #     dtype=tf.float32)
     # cls_weights = tf.reduce_mean(train_samples) / train_samples
     transform_function = stft_to_mel_intensity_vector(config)
-    @tf.function
     def trainstep(maskmodel, model, x, y, optimizer):
         with tf.GradientTape() as tape:
             masked_x = maskmodel(x, training=config.masktrain)
@@ -227,7 +234,14 @@ def generate_trainstep(criterion, config):
         optimizer.apply_gradients(zip(grad, model.trainable_variables))
 
         return y_p, loss
-    return trainstep
+    @tf.function
+    def distributed_train_step(dist_inputs):
+        per_replica_losses = distributed_strategy.run(trainstep, args=(dist_inputs,))
+        return distributed_strategy.reduce(tf.distribute.ReduceOp.SUM, per_replica_losses, axis=None)
+    if distributed_strategy is None:
+        return tf.function(trainstep)
+    else: 
+        return distributed_train_step
 
 
 def generate_teststep(criterion, config):
@@ -257,8 +271,6 @@ def generate_iterloop(criterion, evaluator, writer,
 
         with tqdm(dataset) as pbar:
             for x, y in pbar:
-                # masked_x = maskmodel(x, training=False)
-                # masked_x = tf.reshape(masked_x, [*masked_x.shape[:-2]]+[-1])
                 preds, loss = step(maskmodel, model, x, y, optimizer)
                 y, preds = y, get_accdoa_labels(preds, preds.shape[-1] // 3, config.sed_th)
                 
@@ -332,8 +344,14 @@ def get_stftdata(config, mode: str = 'train'):
     resolution = x.shape[1] // y.shape[1]
     x = x.reshape([-1, config.len * 10 * resolution] + [*x.shape[2:]])
     y = y.reshape([-1, config.len * 10, y.shape[-1]])
+    
+    def gen():
+        for X, Y in zip(x, y):
+            yield X, Y
+    dataset = tf.data.Dataset.from_generator(gen, output_types=(tf.float32, tf.float32), 
+              output_shapes=(tf.TensorShape([config.len * 10 * resolution] + [*x.shape[2:]]),
+                             tf.TensorShape([config.len * 10, y.shape[-1]])))
 
-    dataset = tf.data.Dataset.from_tensor_slices((x, y))
     batch_transforms = [split_total_labels_to_sed_doa]
 
     dataset = dataset.batch(config.batch)
@@ -347,8 +365,15 @@ def get_stftdata(config, mode: str = 'train'):
 
 def main(config):
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
+    if len(config.gpus.split(',')) > 2:
+        global distributed_strategy
+        distributed_strategy = tf.distribute.MirroredStrategy()
     n_classes = 12
     name = '_'.join(['ss2', str(config.lr), str(config.final_lr)]) # np: none pretrained mask, pm: pretrained mask
+    if config.masktrain:
+        name += '_masktrain'
+    if config.pretrain:
+        name += '_pretrain'
     if config.schedule:
         name += '_schedule'
     if config.norm:
@@ -360,6 +385,10 @@ def main(config):
     trainset = get_stftdata(config, 'train')
     valset = get_stftdata(config, 'val')
     testset = get_stftdata(config, 'test')
+    if distributed_strategy is not None:
+        trainset = distributed_strategy.experimental_distribute_dataset(trainset)
+        valset = distributed_strategy.experimental_distribute_dataset(valset)
+        testset = distributed_strategy.experimental_distribute_dataset(testset)
 
     tensorboard_path = os.path.join('./tensorboard_log', config.name)
     if not os.path.exists(tensorboard_path):
@@ -376,17 +405,33 @@ def main(config):
     input_shape = x.shape[1:]
     stft_shape = [config.len * 10 * 5] + [*input_shape[1:]]
     input_shape = [config.len * 10 * 5, config.mel, (input_shape[-1] // 2 + 3) * 13]
-    model = get_model(input_shape)
+    if distributed_strategy is not None:
+        with distributed_strategy.scope():
+            model = get_model(input_shape)
+    else:
+        model = get_model(input_shape)
 
     if config.mask == 1:
         import mask1_train
-        maskmodel = mask1_train.get_model(stft_shape)
+        if distributed_strategy is not None:
+            with distributed_strategy.scope():
+                maskmodel = mask1_train.get_model(stft_shape)
+                if not config.pretrain:
+                    maskmodel.load_weights(os.path.join('saved_model', config.pt, 'maskmodel.h5'))
+        else:
+            maskmodel = mask1_train.get_model(stft_shape)
+            if not config.pretrain:
+                maskmodel.load_weights(os.path.join('saved_model', config.pt, 'maskmodel.h5'))
     kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
     # model = apply_kernel_regularizer(model, kernel_regularizer)
 
     model.summary()
 
-    optimizer = keras.optimizers.Adam(config.lr)
+    if distributed_strategy is not None:
+        with distributed_strategy.scope():
+            optimizer = keras.optimizers.Adam(config.lr)
+    else:
+        optimizer = keras.optimizers.Adam(config.lr)
     criterion = keras.losses.MSE
 
     if config.resume:
