@@ -69,9 +69,6 @@ class ARGS:
 
     def get(self):
         return self.args.parse_args()
-        
-args = ARGS().get()
-os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
 
 
 """ COMPLEX-SPECTROGRAMS """
@@ -632,7 +629,7 @@ def mse_100000times(y_true, y_pred):
 def main(config):
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     n_classes = 12
-    name = '_'.join(['maskmodel', str(config.lr), str(config.final_lr)])
+    name = '_'.join(['maskmodel1', str(config.lr), str(config.final_lr)])
     if config.schedule:
         name += '_schedule'
     # if config.norm:
@@ -678,6 +675,8 @@ def main(config):
 
 
 if __name__=='__main__':
+    args = ARGS().get()
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpus
     main(args)
     # os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
     # input_shape = [320, 128, 7]

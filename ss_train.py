@@ -38,7 +38,7 @@ args.add_argument('--mel', type=int, default=128)
 args.add_argument('--masktrain', action='store_true')
 args.add_argument('--decay', type=float, default=0.9)
 args.add_argument('--sed_th', type=float, default=0.3)
-args.add_argument('--lr', type=float, default=0.003)
+args.add_argument('--lr', type=float, default=0.001)
 args.add_argument('--final_lr', type=float, default=0.0001)
 args.add_argument('--batch', type=int, default=8)
 args.add_argument('--agc', type=bool, default=False)
@@ -230,7 +230,8 @@ def generate_trainstep(criterion, config):
     return trainstep
 
 
-def generate_teststep(criterion):
+def generate_teststep(criterion, config):
+    transform_function = stft_to_mel_intensity_vector(config)
     @tf.function
     def teststep(maskmodel, model, x, y, optimizer=None):
         masked_x = maskmodel(x, training=False)
@@ -248,7 +249,7 @@ def generate_iterloop(criterion, evaluator, writer,
     if mode == 'train':
         step = generate_trainstep(criterion, config)
     else:
-        step = generate_teststep(criterion)
+        step = generate_teststep(criterion, config)
 
     def iterloop(maskmodel, model, dataset, epoch, optimizer=None):
         evaluator.reset_states()
@@ -347,7 +348,7 @@ def get_stftdata(config, mode: str = 'train'):
 def main(config):
     os.environ['CUDA_VISIBLE_DEVICES'] = config.gpus
     n_classes = 12
-    name = '_'.join(['ss2', str(config.lr), str(config.final_lr)])
+    name = '_'.join(['ss2', str(config.lr), str(config.final_lr)]) # np: none pretrained mask, pm: pretrained mask
     if config.schedule:
         name += '_schedule'
     if config.norm:
@@ -378,16 +379,12 @@ def main(config):
     model = get_model(input_shape)
 
     if config.mask == 1:
-        import sys
-        idx = sys.argv.index('--mask')
-        del sys.argv[idx:idx+2]
         import mask1_train
         maskmodel = mask1_train.get_model(stft_shape)
     kernel_regularizer = tf.keras.regularizers.l1_l2(l1=0, l2=0.0001)
     # model = apply_kernel_regularizer(model, kernel_regularizer)
 
     model.summary()
-    exit()
 
     optimizer = keras.optimizers.Adam(config.lr)
     criterion = keras.losses.MSE
