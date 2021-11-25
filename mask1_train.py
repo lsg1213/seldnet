@@ -436,7 +436,7 @@ def get_model(input_shape):
     complex_mask = Dense(inp.shape[-2] * inp.shape[-1] * class_num, name="complex_mask", kernel_initializer=tf.keras.initializers.GlorotUniform(seed=87))(fc3)
 
     complex_mask_out = Reshape((inp.shape[-3], inp.shape[-2], -1, class_num))(complex_mask)
-    complex_mask_out = LayerNormalization((-4, -2))(complex_mask_out) # class and time wise normalization
+    complex_mask_out = LayerNormalization((-4, -2))(complex_mask_out) # channel and time wise normalization
     return CustomModel(inputs=inp, outputs=complex_mask_out)
 
 
