@@ -20,7 +20,7 @@ from utils import adaptive_clip_grad, apply_kernel_regularizer
 
 
 distributed_strategy = None
-
+EPSILON = 1e-6
 
 args = argparse.ArgumentParser()
     
@@ -45,8 +45,8 @@ args.add_argument('--pretrain', action='store_true')
 args.add_argument('--pt', type=str, default='')
 args.add_argument('--decay', type=float, default=0.9)
 args.add_argument('--sed_th', type=float, default=0.3)
-args.add_argument('--lr', type=float, default=0.001)
-args.add_argument('--final_lr', type=float, default=0.0001)
+args.add_argument('--lr', type=float, default=0.0002)
+args.add_argument('--final_lr', type=float, default=0.00001)
 args.add_argument('--batch', type=int, default=8)
 args.add_argument('--agc', type=bool, default=False)
 args.add_argument('--epoch', type=int, default=60)
@@ -197,9 +197,11 @@ def stft_to_mel_intensity_vector(config):
         stft_real = stft[:chan,...]
         stft = tf.complex(stft_real, stft[chan:,...])
         inten_vec = foa_intensity_vectors_tf(stft)
+
+        mel = tf.matmul(stft_real, mel_mat)
+        mel = tf.math.log(mel + EPSILON)
+        inten_vec = tf.matmul(inten_vec, mel_mat)
         stft = tf.concat([stft_real, inten_vec], 0)
-        
-        out = tf.matmul(stft, mel_mat)
         return tf.transpose(out, [2,3,4,0,1])
     return _stft_to_mel_intensity_vector
 
