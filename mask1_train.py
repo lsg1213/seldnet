@@ -39,7 +39,7 @@ class ARGS:
         self.set('--decay', type=float, default=0.9)
         self.set('--sed_th', type=float, default=0.3)
         self.set('--lr', type=float, default=1e-3)
-        self.set('--final_lr', type=float, default=0.00001)
+        self.set('--final_lr', type=float, default=1e-5)
         self.set('--batch', type=int, default=8)
         self.set('--agc', type=bool, default=False)
         self.set('--epoch', type=int, default=200)
@@ -436,6 +436,7 @@ def get_model(input_shape):
     complex_mask = Dense(inp.shape[-2] * inp.shape[-1] * class_num, name="complex_mask", kernel_initializer=tf.keras.initializers.GlorotUniform(seed=87))(fc3)
 
     complex_mask_out = Reshape((inp.shape[-3], inp.shape[-2], -1, class_num))(complex_mask)
+    complex_mask_out = LayerNormalization((-4, -2))(complex_mask_out) # class and time wise normalization
     return CustomModel(inputs=inp, outputs=complex_mask_out)
 
 
